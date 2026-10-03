@@ -1,0 +1,10 @@
+[project]
+name = "kokoro-sidecar"
+version = "0.1.0"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "mlx-audio",
+    "misaki[en]",
+    # misaki downloads this at runtime otherwise; pin it so `uv sync` keeps it.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]

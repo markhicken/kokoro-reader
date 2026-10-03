@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Kokoro Reader</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header id="bar">
+      <span id="status">Loading model…</span>
+      <div class="controls">
+        <button id="pause" title="Pause / Resume (Space)">⏸</button>
+        <button id="stop" title="Stop (Esc)">⏹</button>
+      </div>
+    </header>
+    <main id="scroller"><div id="text"></div></main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Kokoro Reader Settings</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <div>
+          <h1>Kokoro Reader</h1>
+          <p class="sub">Local text-to-speech</p>
+        </div>
+      </div>
+      <span id="status" class="pill" data-status="loading">Loading…</span>
+    </header>
+
+    <main>
+      <section>
+        <h2>Voice</h2>
+        <div class="card">
+          <div class="row">
+            <label for="voice">Voice</label>
+            <select id="voice"></select>
+          </div>
+          <div class="row">
+            <label for="speed">Speed</label>
+            <div class="slider">
+              <input id="speed" type="range" min="0.5" max="2" step="0.05" />
+              <output id="speedValue"></output>
+            </div>
+          </div>
+          <div class="row">
+            <span class="caption">Letter = Kokoro quality grade · ★ recommended</span>
+            <button type="button" id="preview" class="button">▶&#xFE0E; Preview</button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Highlighting</h2>
+        <div class="card">
+          <div class="row">
+            <div class="text">
+              <label for="highlightInSource">Highlight words in the source app</label>
+              <span class="caption">Marks each word where you selected it. Works in most native apps and Safari.</span>
+            </div>
+            <input id="highlightInSource" type="checkbox" class="switch" />
+          </div>
+          <div class="row">
+            <div class="text">
+              <label for="showPanel">Show reader panel</label>
+              <span class="caption">Floating window with the text and a moving highlight.</span>
+            </div>
+            <input id="showPanel" type="checkbox" class="switch" />
+          </div>
+          <div class="row" id="autoCloseRow">
+            <label for="autoClose">Close panel when finished</label>
+            <input id="autoClose" type="checkbox" class="switch" />
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Shortcut</h2>
+        <div class="card">
+          <div class="row">
+            <div class="text">
+              <label for="hotkey">Read selection</label>
+              <span class="caption">Press again while reading to stop.</span>
+            </div>
+            <button type="button" id="hotkey" class="keycap" title="Click, then press a new shortcut"></button>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Engine</h2>
+        <div class="card">
+          <div class="row">
+            <div class="text">
+              <label for="model">Model precision</label>
+              <span class="caption">Lower precision is smaller and faster, with slightly lower quality.</span>
+            </div>
+            <select id="model">
+              <option value="bf16">bf16 · best</option>
+              <option value="8bit">8-bit</option>
+              <option value="6bit">6-bit</option>
+              <option value="4bit">4-bit · smallest</option>
+            </select>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

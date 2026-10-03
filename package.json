@@ -1,0 +1,97 @@
+{
+  "name": "kokoro-reader",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Free, private, AI text-to-speech for macOS",
+  "license": "GPL-3.0-only",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "npm run build:native && electron-vite dev",
+    "build": "npm run build:native && electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node node_modules/electron/install.js && cd python && uv sync",
+    "dist": "npm run build && cp \"$(command -v uv)\" build/bin/uv && electron-builder --mac",
+    "build:native": "mkdir -p build/bin && swiftc -O native/helper.swift -o build/bin/kokoro-helper"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  },
+  "productName": "Kokoro Reader",
+  "build": {
+    "appId": "local.kokoro-gui.reader",
+    "productName": "Kokoro Reader",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "python",
+        "to": "python",
+        "filter": [
+          "kokoro_server.py",
+          "pyproject.toml",
+          "uv.lock"
+        ]
+      },
+      {
+        "from": "build/bin",
+        "to": "bin",
+        "filter": [
+          "uv",
+          "kokoro-helper"
+        ]
+      },
+      {
+        "from": "LICENSE",
+        "to": "licenses/LICENSE"
+      },
+      {
+        "from": "node_modules/electron/dist/LICENSE",
+        "to": "licenses/electron-LICENSE"
+      },
+      {
+        "from": "node_modules/electron/dist/LICENSES.chromium.html",
+        "to": "licenses/LICENSES.chromium.html"
+      },
+      {
+        "from": "build/licenses",
+        "to": "licenses",
+        "filter": [
+          "uv-*"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "title": "Kokoro Reader"
+    }
+  }
+}

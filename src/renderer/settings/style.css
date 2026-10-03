@@ -1,0 +1,302 @@
+:root {
+  color-scheme: light dark;
+  --accent: #ff7a45;
+  --accent-2: #d6336c;
+  --text: rgba(0, 0, 0, 0.88);
+  --text-2: rgba(0, 0, 0, 0.5);
+  --card: rgba(255, 255, 255, 0.72);
+  --card-border: rgba(0, 0, 0, 0.07);
+  --divider: rgba(0, 0, 0, 0.07);
+  --control: rgba(0, 0, 0, 0.06);
+  --control-hover: rgba(0, 0, 0, 0.1);
+  --switch-off: rgba(0, 0, 0, 0.16);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: rgba(255, 255, 255, 0.9);
+    --text-2: rgba(255, 255, 255, 0.5);
+    --card: rgba(255, 255, 255, 0.06);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --divider: rgba(255, 255, 255, 0.07);
+    --control: rgba(255, 255, 255, 0.09);
+    --control-hover: rgba(255, 255, 255, 0.14);
+    --switch-off: rgba(255, 255, 255, 0.18);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: transparent;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* Title bar: draggable like a native window; leaves room for the traffic lights. */
+.titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 40px 22px 14px;
+}
+.titlebar .pill {
+  -webkit-app-region: no-drag;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  box-shadow: 0 2px 8px rgba(214, 51, 108, 0.35);
+}
+.logo i {
+  width: 3.5px;
+  border-radius: 2px;
+  background: #fff;
+}
+.logo i:nth-child(1),
+.logo i:nth-child(5) {
+  height: 9px;
+}
+.logo i:nth-child(2),
+.logo i:nth-child(4) {
+  height: 16px;
+}
+.logo i:nth-child(3) {
+  height: 23px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.sub {
+  margin: 1px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.pill {
+  font-size: 11px;
+  font-weight: 550;
+  padding: 3px 9px 3px 20px;
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--text-2);
+  position: relative;
+}
+.pill::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: #f5a524;
+}
+.pill[data-status='ready']::before {
+  background: #30d158;
+}
+.pill[data-status='error']::before,
+.pill[data-status='stopped']::before {
+  background: #ff453a;
+}
+.pill[data-status='loading']::before {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+main {
+  padding: 0 22px 22px;
+}
+
+h2 {
+  margin: 16px 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 8px 14px;
+}
+.row + .row {
+  border-top: 1px solid var(--divider);
+}
+.row.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+label {
+  font-weight: 500;
+}
+.caption {
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+
+select {
+  font: inherit;
+  color: inherit;
+  max-width: 230px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  background: var(--control);
+  outline: none;
+}
+select:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  max-width: 230px;
+}
+output {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  min-width: 42px;
+  text-align: right;
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent) var(--fill, 50%), var(--switch-off) var(--fill, 50%));
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.2),
+    0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.button {
+  font: inherit;
+  font-weight: 550;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 5px 14px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  box-shadow: 0 1px 3px rgba(214, 51, 108, 0.35);
+}
+.button:active {
+  filter: brightness(0.92);
+}
+
+/* iOS/macOS-style toggle switch built on a checkbox. */
+.switch {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 11px;
+  background: var(--switch-off);
+  transition: background 0.18s;
+  outline: none;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s;
+}
+.switch:checked {
+  background: var(--accent);
+}
+.switch:checked::after {
+  transform: translateX(16px);
+}
+.switch:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.keycap {
+  font: 600 13px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: inherit;
+  letter-spacing: 0.06em;
+  min-width: 96px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--card-border);
+  border-bottom-width: 2px;
+  background: var(--control);
+}
+.keycap:hover {
+  background: var(--control-hover);
+}
+.keycap.recording {
+  color: var(--accent);
+  border-color: var(--accent);
+  letter-spacing: normal;
+  font-weight: 500;
+}
