@@ -14,7 +14,23 @@ word is highlighted as it is spoken. Kokoro Reader is a menu-bar app built on th
   only network access is the one-time download of the model and Python dependencies.
 - **AI voices** — Kokoro's neural voices, with adjustable voice, speed, and model precision.
 
+## Download
+
+Grab the latest `.dmg` from the [Releases page](https://github.com/markhicken/kokoro-reader/releases/latest)
+(Apple Silicon only), open it, and drag Kokoro Reader to Applications.
+
+The app is not notarized, so macOS may block the first launch. Right-click the app and choose **Open**,
+or run:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Kokoro Reader.app"
+```
+
+To build from source instead, see below.
+
 ## Requirements
+
+Building from source needs:
 
 - **Apple Silicon Mac** — MLX only runs on Apple Silicon; the build is arm64-only.
 - **Node.js** 20.19+ or 22.12+ (required by Vite 7 / electron-vite 5).
