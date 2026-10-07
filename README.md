@@ -7,7 +7,7 @@ word is highlighted as it is spoken. Kokoro Reader is a menu-bar app built on th
 [Kokoro TTS](https://github.com/hexgrad/kokoro) model, run locally on Apple Silicon via
 [mlx-audio](https://github.com/Blaizzy/mlx-audio).
 
-<img width="458" height="757" alt="Screenshot 2026-10-02 at 5 09 28 PM" src="https://github.com/user-attachments/assets/49ff9ecd-d77f-4f46-a5e8-cf60213b46a0" />
+<img width="459" height="838" alt="Screenshot 2026-10-07 at 10 41 10 AM" src="https://github.com/user-attachments/assets/54adb358-243f-4dc5-a994-de986f6efc3e" />
 
 - **Free** — open source (GPL-3.0), no subscription, no API keys, no usage limits.
 - **Private** — speech is generated entirely on your Mac. Your text is never sent to a server; the
