@@ -20,6 +20,11 @@ let currentId: string | null = null
 /** Whether the current read can be highlighted in the source app. */
 let currentSourceHighlight = false
 let firstRun = false
+/** True from the moment a read is requested until the engine has finished generating its audio. */
+let generating = false
+let spinnerTimer: ReturnType<typeof setInterval> | undefined
+let spinnerFrame = 0
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 function loadRenderer(win: BrowserWindow, page: 'settings' | 'reader'): void {
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -90,6 +95,17 @@ function openSettings(): void {
   })
   settingsWin.on('closed', () => (settingsWin = null))
   loadRenderer(settingsWin, 'settings')
+  // Fit window to content so no scrolling is needed (capped to the display).
+  const win = settingsWin
+  win.webContents.once('did-finish-load', async () => {
+    try {
+      const h: number = await win.webContents.executeJavaScript('document.documentElement.scrollHeight')
+      const max = screen.getDisplayMatching(win.getBounds()).workArea.height - 40
+      win.setContentSize(460, Math.min(Math.max(h, 400), max))
+    } catch {
+      /* window closed before load finished */
+    }
+  })
   app.focus({ steal: true })
 }
 
@@ -103,20 +119,21 @@ function readText(text: string, sourceHighlight = false): void {
     return
   }
   stopReading(false)
-  const { voice, speed, showPanel, highlightInSource } = getSettings()
+  const { voice, speed, showPanel, highlightInSource, joinLines, expandWords } = getSettings()
   const id = randomUUID()
   currentId = id
   currentSourceHighlight = sourceHighlight && highlightInSource
 
   if (!readerWin) readerWin = createReaderWindow()
   const win = readerWin
-  const send = () => win.webContents.send('reader:start', { id, text })
+  const send = () => safeSend(win, 'reader:start', { id, text })
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send)
   else send()
   if (showPanel) win.showInactive()
   else win.hide()
 
-  engine.speak(id, text, voice, speed)
+  setGenerating(true)
+  engine.speak(id, text, voice, speed, joinLines, expandWords)
   rebuildMenu()
 }
 
@@ -139,6 +156,38 @@ async function readSelection(): Promise<void> {
   }
 }
 
+/** Send to a window only if it and its frame are still alive (they can be torn down mid-event). */
+function safeSend(win: BrowserWindow | null | undefined, channel: string, ...args: unknown[]): void {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+  try {
+    win.webContents.send(channel, ...args)
+  } catch (e) {
+    console.error(`[kokoro] send ${channel} failed:`, (e as Error).message)
+  }
+}
+
+function updateTrayTitle(): void {
+  if (!tray) return
+  if (generating) tray.setTitle(SPINNER_FRAMES[spinnerFrame])
+  else tray.setTitle(engine.getStatus() === 'ready' ? '' : '…')
+}
+
+/** Animate the menu-bar icon while audio is being generated. */
+function setGenerating(value: boolean): void {
+  if (generating === value) return
+  generating = value
+  clearInterval(spinnerTimer)
+  spinnerTimer = undefined
+  if (value) {
+    spinnerFrame = 0
+    spinnerTimer = setInterval(() => {
+      spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length
+      updateTrayTitle()
+    }, 100)
+  }
+  updateTrayTitle()
+}
+
 function stopReading(hide = true): void {
   // Only clear when a read was in progress: right after a capture, `clear` would also
   // switch the source app's accessibility tree back off before we highlight in it.
@@ -148,8 +197,9 @@ function stopReading(hide = true): void {
   }
   currentId = null
   currentSourceHighlight = false
+  setGenerating(false)
   if (hide) {
-    readerWin?.webContents.send('reader:stop')
+    safeSend(readerWin, 'reader:stop')
     readerWin?.hide()
   }
   rebuildMenu()
@@ -160,7 +210,7 @@ function showMessage(message: string): void {
   stopReading(false)
   if (!readerWin) readerWin = createReaderWindow()
   const win = readerWin
-  const send = () => win.webContents.send('reader:message', message)
+  const send = () => safeSend(win, 'reader:message', message)
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send)
   else send()
   win.showInactive()
@@ -226,7 +276,7 @@ function rebuildMenu(): void {
   if (!tray) return
   const status = engine.getStatus()
   const { hotkey } = getSettings()
-  tray.setTitle(status === 'ready' ? '' : '…')
+  updateTrayTitle()
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
@@ -307,17 +357,23 @@ function wireIpc(): void {
 function wireEngine(): void {
   engine.on('status', (s: EngineStatus) => {
     rebuildMenu()
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('status', s)
+    for (const w of BrowserWindow.getAllWindows()) safeSend(w, 'status', s)
   })
   engine.on('chunk', (chunk) => {
-    if (chunk.id === currentId) readerWin?.webContents.send('reader:chunk', chunk)
+    if (chunk.id === currentId) safeSend(readerWin, 'reader:chunk', chunk)
   })
   engine.on('done', (id: string) => {
-    if (id === currentId) readerWin?.webContents.send('reader:done', id)
+    if (id === currentId) {
+      setGenerating(false)
+      safeSend(readerWin, 'reader:done', id)
+    }
   })
   engine.on('error', (id: string | null, message: string) => {
     console.error('[kokoro]', message)
-    if (id === null || id === currentId) readerWin?.webContents.send('reader:error', message)
+    if (id === null || id === currentId) {
+      setGenerating(false)
+      safeSend(readerWin, 'reader:error', message)
+    }
   })
 }
 

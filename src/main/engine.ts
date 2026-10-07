@@ -7,6 +7,8 @@ import { createInterface } from 'node:readline'
 import type { Chunk, EngineStatus, ModelVariant } from '../shared/types'
 
 const MODEL_IDS: Record<ModelVariant, string> = {
+  // No fp32 repo exists; the server upcasts bf16 weights (see --dtype).
+  fp32: 'mlx-community/Kokoro-82M-bf16',
   bf16: 'mlx-community/Kokoro-82M-bf16',
   '8bit': 'mlx-community/Kokoro-82M-8bit',
   '6bit': 'mlx-community/Kokoro-82M-6bit',
@@ -64,6 +66,7 @@ export class KokoroEngine extends EventEmitter {
       args.push('--frozen')
     }
     args.push('python', join(pythonDir, 'kokoro_server.py'), '--model', MODEL_IDS[this.model])
+    if (this.model === 'fp32') args.push('--dtype', 'float32')
     const proc = spawn(uvPath ?? findUv(), args, { cwd: pythonDir, env })
     this.proc = proc
 
@@ -94,8 +97,8 @@ export class KokoroEngine extends EventEmitter {
     this.start()
   }
 
-  speak(id: string, text: string, voice: string, speed: number): void {
-    this.send({ id, cmd: 'speak', text, voice, speed })
+  speak(id: string, text: string, voice: string, speed: number, joinLines: boolean, expandWords: boolean): void {
+    this.send({ id, cmd: 'speak', text, voice, speed, joinLines, expandWords })
   }
 
   cancel(id: string): void {

@@ -20,8 +20,14 @@ function setStatus(text: string): void {
   statusEl.textContent = text
 }
 
+/** Show the spinner while audio is still being generated. */
+function setBusy(busy: boolean): void {
+  document.body.classList.toggle('busy', busy)
+}
+
 function reset(): void {
   clearInterval(timer)
+  setBusy(false)
   player.stop()
   highlighter = null
   jobId = null
@@ -52,6 +58,7 @@ api.onReaderStart(({ id, text }) => {
   reset()
   jobId = id
   generationDone = false
+  setBusy(true)
   void player.begin()
   highlighter = new Highlighter(textEl, scroller, text)
   scroller.scrollTop = 0
@@ -68,7 +75,9 @@ api.onChunk((chunk) => {
 })
 
 api.onDone((id) => {
-  if (id === jobId) generationDone = true
+  if (id !== jobId) return
+  generationDone = true
+  setBusy(false)
 })
 
 api.onStop(() => {
@@ -82,7 +91,10 @@ api.onMessage((message) => {
   setStatus('Kokoro')
 })
 
-api.onError((message) => setStatus(`Error: ${message}`))
+api.onError((message) => {
+  setBusy(false)
+  setStatus(`Error: ${message}`)
+})
 
 pauseBtn.addEventListener('click', togglePause)
 $('stop').addEventListener('click', stop)

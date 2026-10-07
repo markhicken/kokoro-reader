@@ -33,6 +33,9 @@ export class AccessibilityHelper {
         this.pending = null
       }
     })
+    // A write to a dead helper emits EPIPE here; without a listener it is an uncaught exception.
+    proc.stdin.on('error', (e) => console.error(`[helper] stdin error: ${e.message}`))
+    proc.on('error', (e) => console.error(`[helper] spawn error: ${e.message}`))
     proc.stderr.on('data', (d) => console.log(`[helper] ${String(d).trimEnd()}`))
     proc.on('exit', (code) => {
       console.error(`[helper] exited (code ${code})`)
@@ -72,7 +75,8 @@ export class AccessibilityHelper {
   }
 
   private send(msg: object): void {
-    this.proc?.stdin.write(JSON.stringify(msg) + '\n')
+    const stdin = this.proc?.stdin
+    if (stdin?.writable) stdin.write(JSON.stringify(msg) + '\n')
   }
 }
 

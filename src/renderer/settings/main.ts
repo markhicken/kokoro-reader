@@ -54,6 +54,8 @@ const modelEl = $<HTMLSelectElement>('model')
 const hotkeyEl = $<HTMLButtonElement>('hotkey')
 const showPanelEl = $<HTMLInputElement>('showPanel')
 const highlightEl = $<HTMLInputElement>('highlightInSource')
+const joinLinesEl = $<HTMLInputElement>('joinLines')
+const expandWordsEl = $<HTMLInputElement>('expandWords')
 const autoCloseEl = $<HTMLInputElement>('autoClose')
 const autoCloseRow = $('autoCloseRow')
 const statusEl = $('status')
@@ -94,6 +96,8 @@ function render(s: Settings): void {
   if (!recording) hotkeyEl.textContent = prettyHotkey(s.hotkey)
   showPanelEl.checked = s.showPanel
   highlightEl.checked = s.highlightInSource
+  joinLinesEl.checked = s.joinLines
+  expandWordsEl.checked = s.expandWords
   autoCloseEl.checked = s.autoClosePanel
   autoCloseRow.classList.toggle('disabled', !s.showPanel)
 }
@@ -111,6 +115,8 @@ speedEl.addEventListener('change', () => save({ speed: Number(speedEl.value) }))
 modelEl.addEventListener('change', () => save({ model: modelEl.value as ModelVariant }))
 showPanelEl.addEventListener('change', () => save({ showPanel: showPanelEl.checked }))
 highlightEl.addEventListener('change', () => save({ highlightInSource: highlightEl.checked }))
+joinLinesEl.addEventListener('change', () => save({ joinLines: joinLinesEl.checked }))
+expandWordsEl.addEventListener('change', () => save({ expandWords: expandWordsEl.checked }))
 autoCloseEl.addEventListener('change', () => save({ autoClosePanel: autoCloseEl.checked }))
 $('preview').addEventListener('click', () => api.preview())
 

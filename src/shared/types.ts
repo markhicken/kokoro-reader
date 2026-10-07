@@ -1,4 +1,4 @@
-export type ModelVariant = 'bf16' | '8bit' | '6bit' | '4bit'
+export type ModelVariant = 'fp32' | 'bf16' | '8bit' | '6bit' | '4bit'
 
 export interface Settings {
   voice: string
@@ -10,6 +10,10 @@ export interface Settings {
   showPanel: boolean
   /** Highlight the spoken word in the app the text was selected from. */
   highlightInSource: boolean
+  /** Merge hard-wrapped lines into one sentence before speaking. */
+  joinLines: boolean
+  /** Expand abbreviations (Dr., e.g., ...) into words before speaking. */
+  expandWords: boolean
   panelBounds?: { x: number; y: number; width: number; height: number }
 }
 

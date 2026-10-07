@@ -41,6 +41,26 @@
       </section>
 
       <section>
+        <h2>Text</h2>
+        <div class="card">
+          <div class="row">
+            <div class="text">
+              <label for="joinLines">Join line broken sentences</label>
+              <span class="caption">Merges hard-wrapped lines so a line break mid-sentence doesn't cause a pause.</span>
+            </div>
+            <input id="joinLines" type="checkbox" class="switch" />
+          </div>
+          <div class="row">
+            <div class="text">
+              <label for="expandWords">Expand words</label>
+              <span class="caption">Dr., Mr., Mrs., Ms., Prof., vs., etc., e.g., i.e., approx.</span>
+            </div>
+            <input id="expandWords" type="checkbox" class="switch" />
+          </div>
+        </div>
+      </section>
+
+      <section>
         <h2>Highlighting</h2>
         <div class="card">
           <div class="row">
@@ -86,7 +106,8 @@
               <span class="caption">Lower precision is smaller and faster, with slightly lower quality.</span>
             </div>
             <select id="model">
-              <option value="bf16">bf16 · best</option>
+              <option value="fp32">fp32 · best, largest</option>
+              <option value="bf16">bf16</option>
               <option value="8bit">8-bit</option>
               <option value="6bit">6-bit</option>
               <option value="4bit">4-bit · smallest</option>

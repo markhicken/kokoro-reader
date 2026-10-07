@@ -11,7 +11,9 @@ const DEFAULTS: Settings = {
   hotkey: 'Alt+Shift+Space',
   autoClosePanel: true,
   showPanel: true,
-  highlightInSource: true
+  highlightInSource: true,
+  joinLines: true,
+  expandWords: true
 }
 
 const file = () => join(app.getPath('userData'), 'settings.json')

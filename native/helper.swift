@@ -91,12 +91,40 @@ func focusedElement(in app: AXUIElement) -> AXUIElement? {
 
 // MARK: - Source location of the captured selection
 
+private typealias CopyStartMarker = @convention(c) (CFTypeRef) -> Unmanaged<CFTypeRef>?
+private let copyStartMarker: CopyStartMarker? = {
+    guard let h = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW), let f = dlsym(h, "AXTextMarkerRangeCopyStartMarker") else { return nil }
+    return unsafeBitCast(f, to: CopyStartMarker.self)
+}()
+
+private let copyEndMarker: CopyStartMarker? = {
+    guard let h = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW), let f = dlsym(h, "AXTextMarkerRangeCopyEndMarker") else { return nil }
+    return unsafeBitCast(f, to: CopyStartMarker.self)
+}()
+
+/// Earliest marker of a selection. A right-to-left selection yields a reversed range
+/// whose "start" is really its end, so order the two ends first.
+func earliestMarker(_ el: AXUIElement, _ range: CFTypeRef) -> CFTypeRef? {
+    guard let a = startMarker(el, range) else { return nil }
+    guard let end = param(el, "AXEndTextMarkerForTextMarkerRange", range) ?? copyEndMarker?(range)?.takeRetainedValue(),
+          let ordered = param(el, "AXTextMarkerRangeForUnorderedTextMarkers", [a, end] as CFArray),
+          let first = startMarker(el, ordered) else { return a }
+    return first
+}
+
+/// Start marker of a marker range. Newer macOS no longer advertises the
+/// AXStartTextMarkerForTextMarkerRange attribute, so fall back to the C function.
+func startMarker(_ el: AXUIElement, _ range: CFTypeRef) -> CFTypeRef? {
+    if let m = param(el, "AXStartTextMarkerForTextMarkerRange", range) { return m }
+    return copyStartMarker?(range)?.takeRetainedValue()
+}
+
 /// Text-marker based text (WebKit, Chromium, Firefox). Positions are UTF-16 offsets
 /// relative to the selection start. Uses marker indices when the app supports them
 /// (WebKit), otherwise walks marker-by-marker from the selection start (Chromium).
 final class MarkerText {
     let el: AXUIElement
-    private let startIndex: Int?
+    private var startIndex: Int?
     private var cursor: CFTypeRef
     private var cursorPos = 0
     /// Correction for drift between the selected string and marker positions
@@ -104,8 +132,14 @@ final class MarkerText {
     var delta = 0
 
     init?(_ el: AXUIElement) {
-        guard let markers = attr(el, "AXSelectedTextMarkerRange"),
-              let start = param(el, "AXStartTextMarkerForTextMarkerRange", markers) else { return nil }
+        guard let markers = attr(el, "AXSelectedTextMarkerRange") else {
+            log("markers: AXSelectedTextMarkerRange is nil")
+            return nil
+        }
+        guard let start = earliestMarker(el, markers) else {
+            log("markers: could not get start marker (no AXStartTextMarkerForTextMarkerRange, no C fallback)")
+            return nil
+        }
         self.el = el
         cursor = start
         startIndex = param(el, "AXIndexForTextMarker", start) as? Int
@@ -143,6 +177,13 @@ final class MarkerText {
     func rect(from: Int, to: Int, text: String) -> CGRect? {
         let len = to - from
         var a = from + delta
+        if startIndex != nil, string(a, a + len) != text, string(a - 40, a + len + 40)?.contains(text) != true {
+            // Index lookups don't line up with this app (some Chromium builds): walk markers instead.
+            diag("index mode failed for \"\(text)\" at \(a); switching to walk")
+            startIndex = nil
+            delta = 0
+            a = from
+        }
         if string(a, a + len) != text {
             let pad = 40
             let lo = a - pad
@@ -177,6 +218,9 @@ enum Source {
 }
 
 var source: Source?
+/// App and focused element the current selection was captured from.
+var sourcePid: pid_t?
+var sourceElement: AXUIElement?
 /// Log the first highlight failure per capture, to diagnose apps that don't cooperate.
 var loggedFailure = false
 
@@ -230,6 +274,8 @@ func capture() {
     overlay.hide()
     restoreAccessibility()
     source = nil
+    sourcePid = nil
+    sourceElement = nil
     loggedFailure = false
     guard AXIsProcessTrusted() else {
         send(["type": "capture", "ok": false, "error": "untrusted"])
@@ -265,6 +311,8 @@ func capture() {
         return
     }
     source = located
+    sourcePid = front.processIdentifier
+    sourceElement = el
     let how: String
     switch located {
     case .range?: how = "range"
@@ -275,7 +323,22 @@ func capture() {
     send(["type": "capture", "ok": true, "text": text, "sourceHighlight": located != nil])
 }
 
+/// True while the captured selection is still what the user is looking at: its app is
+/// frontmost and its element still has focus (a tab switch changes the focused web area).
+func sourceStillVisible() -> Bool {
+    guard let pid = sourcePid, let el = sourceElement else { return false }
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.2)
+    guard let focused = focusedElement(in: app) else { return false }
+    return CFEqual(focused, el)
+}
+
 func wordRect(from: Int, to: Int, text: String) -> CGRect? {
+    guard sourceStillVisible() else {
+        diag("source no longer frontmost/focused; hiding")
+        return nil
+    }
     switch source {
     case let .range(el, start)?:
         var range = CFRange(location: start + from, length: to - from)
@@ -345,6 +408,13 @@ final class Overlay {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let overlay = Overlay()
+// Hide the highlight as soon as another app comes to the front.
+NSWorkspace.shared.notificationCenter.addObserver(
+    forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+) { note in
+    let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+    if let pid = sourcePid, app?.processIdentifier != pid { overlay.hide() }
+}
 
 func handle(_ line: String) {
     guard let data = line.data(using: .utf8),

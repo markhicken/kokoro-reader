@@ -23,6 +23,29 @@ body {
   font-size: 12px;
   opacity: 0.75;
 }
+#status-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#spinner {
+  display: none;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+body.busy #spinner {
+  display: inline-block;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .controls {
   -webkit-app-region: no-drag;
   display: flex;
