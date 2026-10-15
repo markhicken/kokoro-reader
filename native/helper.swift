@@ -294,8 +294,19 @@ func capture() {
     var text = el.flatMap(selectedText)
     var located = el.flatMap(locateSelection)
     // Partial or missing AX tree: ask the app to build it fully, then retry.
-    if (text == nil || located == nil) && requestAccessibility(app) {
-        for _ in 0..<10 {
+    if text == nil || located == nil {
+        // Chromium can drop its AX tree while the app idles (e.g. overnight) yet still report the
+        // switches as on, so requestAccessibility changes nothing. Toggle them off/on to force a rebuild.
+        if !requestAccessibility(app) {
+            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanFalse)
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
+            usleep(50_000)
+            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            if AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) == .success {
+                enhancedApp = app
+            }
+        }
+        for _ in 0..<15 {
             usleep(100_000)
             el = focusedElement(in: app)
             text = el.flatMap(selectedText)
