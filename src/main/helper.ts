@@ -60,7 +60,11 @@ export class AccessibilityHelper {
       this.pending = (msg) => {
         clearTimeout(timer)
         if (msg.ok) resolve({ text: msg.text, sourceHighlight: msg.sourceHighlight })
-        else reject(new Error(CAPTURE_ERRORS[msg.error] ?? `Could not read the selection (${msg.error}).`))
+        else {
+          let message = CAPTURE_ERRORS[msg.error] ?? `Could not read the selection (${msg.error}).`
+          if (msg.error === 'noselection' && msg.app) message += ` (${msg.app}: ${msg.detail})`
+          reject(Object.assign(new Error(message), { code: msg.error }))
+        }
       }
       this.send({ cmd: 'capture' })
     })

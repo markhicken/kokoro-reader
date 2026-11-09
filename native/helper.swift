@@ -10,7 +10,7 @@
 //   {"cmd":"clear"}                           hide the overlay
 // Responses:
 //   {"type":"capture","ok":true,"text":"...","sourceHighlight":true}
-//   {"type":"capture","ok":false,"error":"untrusted"|"noselection"}
+//   {"type":"capture","ok":false,"error":"untrusted"|"noselection","app":"bundle id","detail":"..."}
 import AppKit
 import ApplicationServices
 
@@ -80,6 +80,13 @@ func restoreAccessibility() {
         AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
     }
     enhancedApp = nil
+}
+
+/// True if Accessibility calls are being refused for this process despite AXIsProcessTrusted().
+func axDisabled(_ app: AXUIElement) -> Bool {
+    var value: CFTypeRef?
+    if AXUIElementCopyAttributeValue(app, kAXRoleAttribute as CFString, &value) == .apiDisabled { return true }
+    return AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &value) == .apiDisabled
 }
 
 func focusedElement(in app: AXUIElement) -> AXUIElement? {
@@ -318,7 +325,17 @@ func capture() {
     guard let el, let text else {
         log("capture[\(appName)]: no selection via Accessibility\(el.map { " — " + describe($0) } ?? " — no focused element")")
         restoreAccessibility()
-        send(["type": "capture", "ok": false, "error": "noselection"])
+        // A grant that no longer matches this binary (e.g. after a rebuild) still reports as trusted,
+        // but every AX call fails with apiDisabled. Report it as untrusted so the app re-requests.
+        if axDisabled(app) {
+            log("capture[\(appName)]: AX calls report apiDisabled; permission grant is stale")
+            send(["type": "capture", "ok": false, "error": "untrusted"])
+            return
+        }
+        send([
+            "type": "capture", "ok": false, "error": "noselection", "app": appName,
+            "detail": el.map(describe) ?? "no focused element"
+        ])
         return
     }
     source = located

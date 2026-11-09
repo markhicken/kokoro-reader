@@ -13,10 +13,11 @@ export function isAccessibilityTrusted(): boolean {
  * Ask macOS for Accessibility permission. The build is ad-hoc signed, so after a
  * rebuild the old entry in System Settings can look enabled but no longer match this
  * binary — and macOS won't prompt again while it exists. Reset our own entry first
- * (never another app's, and only when untrusted), then trigger the system prompt.
+ * (never another app's, and only when untrusted or `force`d because the helper found the
+ * grant stale), then trigger the system prompt.
  */
-export async function requestAccessibility(): Promise<void> {
-  if (isAccessibilityTrusted()) return
+export async function requestAccessibility(force = false): Promise<void> {
+  if (!force && isAccessibilityTrusted()) return
   if (app.isPackaged) {
     await new Promise<void>((resolve) =>
       execFile('/usr/bin/tccutil', ['reset', 'Accessibility', BUNDLE_ID], (err) => {

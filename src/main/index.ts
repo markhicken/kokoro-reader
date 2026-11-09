@@ -152,6 +152,12 @@ async function readSelection(): Promise<void> {
     readText(text, sourceHighlight)
   } catch (e) {
     console.error('[kokoro] read selection failed:', (e as Error).message)
+    if ((e as { code?: string }).code === 'untrusted') {
+      // macOS reports us as trusted but the grant is stale (e.g. after a rebuild): reset and re-prompt.
+      showMessage(NEEDS_ACCESSIBILITY)
+      await requestAccessibility(true)
+      return
+    }
     showMessage((e as Error).message)
   }
 }
