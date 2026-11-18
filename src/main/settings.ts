@@ -13,6 +13,8 @@ const DEFAULTS: Settings = {
   autoClosePanel: true,
   showPanel: true,
   showPreparingOverlay: true,
+  showPlaybackControls: true,
+  playbackControlsPosition: null,
   highlightInSource: true,
   joinLines: true,
   expandWords: true

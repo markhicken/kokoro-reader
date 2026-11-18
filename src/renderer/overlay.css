@@ -1,0 +1,11 @@
+:root {
+  color-scheme: dark;
+  color: #fff;
+}
+
+.overlay-surface {
+  box-sizing: border-box;
+  border: 1px solid #ffffff42;
+  border-radius: 12px;
+  background: #171a22d1;
+}

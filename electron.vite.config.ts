@@ -14,7 +14,8 @@ export default defineConfig({
         input: {
           settings: resolve(rendererRoot, 'settings/index.html'),
           reader: resolve(rendererRoot, 'reader/index.html'),
-          preparing: resolve(rendererRoot, 'preparing/index.html')
+          preparing: resolve(rendererRoot, 'preparing/index.html'),
+          playback: resolve(rendererRoot, 'playback/index.html')
         }
       }
     }

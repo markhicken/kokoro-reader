@@ -20,7 +20,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run dist -- --publish never
+      - name: Build ad-hoc signed Mac package
+        # The configured identity is "-", so PR builds sign without a certificate or secrets.
+        env:
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: npm run dist -- --publish never
       - run: node scripts/check-package.mjs
       - run: node scripts/smoke-engine.mjs
       - uses: actions/upload-artifact@v4

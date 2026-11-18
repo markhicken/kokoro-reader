@@ -68,6 +68,7 @@ function checkChunk(message, id, seq) {
   assert.equal(message.type, 'chunk')
   assert.equal(message.id, id)
   assert.equal(message.seq, seq)
+  assert(Number.isFinite(message.speed) && message.speed > 0)
   assert.equal(message.sr, 24000)
   const pcm = Buffer.from(message.pcm, 'base64')
   assert(pcm.length > 0 && pcm.length % 4 === 0)
@@ -114,10 +115,33 @@ try {
     assert.equal(message.type, 'done')
     assert(chunks < 12, 'Cancellation must stop a long selection before it finishes.')
     assert.equal(await readAll(send, next, 'after-cancel', `${english}\n\nThe end.`, 'af_heart'), 2)
+    send({ cmd: 'speak', id: 'live-speed', text: longText, voice: 'af_heart', speed: 1 })
+    const first = await next()
+    checkChunk(first, 'live-speed', 0)
+    assert.equal(first.speed, 1)
+    send({ cmd: 'speed', id: 'live-speed', speed: 1.5 })
+    let seq = 1
+    let fast = false
+    for (let message = await next(); message.type !== 'done'; message = await next()) {
+      checkChunk(message, 'live-speed', seq++)
+      if (message.speed === 1.5 && !fast) {
+        assert(Buffer.from(message.pcm, 'base64').length < Buffer.from(first.pcm, 'base64').length)
+        fast = true
+        send({ cmd: 'cancel', id: 'live-speed' })
+      }
+    }
+    assert(fast, 'An active request should use the updated speed for a later chunk')
+    send({ cmd: 'speak', id: 'regenerate', text: longText, voice: 'af_heart', speed: 1.25, startSeq: 10 })
+    for (const seq of [10, 11]) {
+      const regenerated = await next()
+      checkChunk(regenerated, 'regenerate', seq)
+      assert.equal(regenerated.speed, 1.25)
+    }
+    assert.deepEqual(await next(), { type: 'done', id: 'regenerate' })
     if (windows) await readAll(send, next, 'spanish', '¿Cómo estás? La música empieza a las nueve.', 'ef_dora')
   })
   await runEngine(true, (send, next) => readAll(send, next, 'offline', english, 'af_heart'))
-  console.log('Verified timed speech, streaming, cancellation, and offline relaunch.')
+  console.log('Verified timed speech, streaming, cancellation, live speed changes, chunk regeneration, and offline relaunch.')
 } finally {
   if (dirname(realpathSync(temp)) === scratch) rmSync(temp, { recursive: true, force: true })
 }

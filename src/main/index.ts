@@ -1,9 +1,10 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, Tray, type NativeImage } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, Tray, type BrowserWindowConstructorOptions, type NativeImage, type Rectangle } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync } from 'node:fs'
+import { release } from 'node:os'
 import { format } from 'node:util'
 import { join } from 'node:path'
-import type { EngineStatus, Settings } from '../shared/types'
+import type { EngineStatus, PlaybackCommand, Settings } from '../shared/types'
 import { KokoroEngine, type EngineOptions } from './engine'
 import { AccessibilityHelper } from './helper'
 import { isAccessibilityTrusted, openAccessibilitySettings, requestAccessibility, watchAccessibility } from './permissions'
@@ -14,7 +15,10 @@ import { showWindowsHighlight } from './windows-highlight'
 const PREVIEW_TEXT = 'Hello! This is how I sound at the current speed.'
 const PREPARING_DELAY_MS = 300
 const SPINNER_FRAME_COUNT = 10
+const WINDOW_MARGIN = 24
+const PLAYBACK_CONTROLS_SIZE = { width: 216, height: 54 }
 const windows = process.platform === 'win32'
+const windowsAcrylic = windows && Number(release().split('.')[2]) >= 22621 // Windows 11 22H2
 const APP_ID = 'local.kokoro-gui.reader'
 
 let tray: Tray | null = null
@@ -23,10 +27,14 @@ let traySpinnerFrames: NativeImage[] = []
 let readerWin: BrowserWindow | null = null
 let settingsWin: BrowserWindow | null = null
 let preparingWin: BrowserWindow | null = null
+let playbackWin: BrowserWindow | null = null
+let playbackReady = false
+let playbackPaused = false
 let preparingTimer: ReturnType<typeof setTimeout> | undefined
 let engine: KokoroEngine
 let helper: AccessibilityHelper
 let currentId: string | null = null
+let speech: { generationId: string; text: string; voice: string; joinLines: boolean; expandWords: boolean } | null = null
 /** Whether the current read can be highlighted in the source app. */
 let currentSourceHighlight = false
 let capturing = false
@@ -36,7 +44,7 @@ let readStatus: ReadStatus = 'idle'
 let spinnerTimer: ReturnType<typeof setInterval> | undefined
 let spinnerFrame = 0
 
-function loadRenderer(win: BrowserWindow, page: 'settings' | 'reader' | 'preparing'): void {
+function loadRenderer(win: BrowserWindow, page: 'settings' | 'reader' | 'preparing' | 'playback'): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${page}/index.html`)
   } else {
@@ -50,32 +58,60 @@ const webPreferences = () => ({
   contextIsolation: true
 })
 
-function createReaderWindow(): BrowserWindow {
-  const { panelBounds } = getSettings()
+const overlayOptions: BrowserWindowConstructorOptions = {
+  show: false,
+  frame: false,
+  transparent: true,
+  alwaysOnTop: true,
+  skipTaskbar: true,
+  ...(windows ? {} : { vibrancy: 'hud', visualEffectState: 'active' })
+}
+
+function configureOverlay(win: BrowserWindow): void {
+  if (windowsAcrylic) win.setBackgroundMaterial('acrylic')
+  if (!windows) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+}
+
+function defaultReaderBounds(): Rectangle {
+  const { showPlaybackControls, playbackControlsPosition } = getSettings()
   const area = screen.getPrimaryDisplay().workArea
   const width = 460
   const height = 240
-  const win = new BrowserWindow({
+  const reservedHeight = showPlaybackControls && !playbackControlsPosition ? PLAYBACK_CONTROLS_SIZE.height + 12 : 0
+  return {
+    x: area.x + area.width - width - WINDOW_MARGIN,
+    y: Math.max(area.y, area.y + area.height - height - WINDOW_MARGIN - reservedHeight),
     width,
-    height,
-    x: panelBounds?.x ?? area.x + area.width - width - 24,
-    y: panelBounds?.y ?? area.y + area.height - height - 24,
-    ...(panelBounds && { width: panelBounds.width, height: panelBounds.height }),
+    height
+  }
+}
+
+function positionDefaultReader(): void {
+  if (!readerWin || getSettings().panelBounds) return
+  const { x, y } = defaultReaderBounds()
+  readerWin.setPosition(x, y)
+}
+
+function createReaderWindow(): BrowserWindow {
+  const { panelBounds } = getSettings()
+  const win = new BrowserWindow({
+    ...overlayOptions,
+    ...(panelBounds ?? defaultReaderBounds()),
     minWidth: 260,
     minHeight: 120,
-    show: false,
-    frame: false,
-    transparent: true,
-    ...(!windows && { vibrancy: 'hud', visualEffectState: 'active' }),
-    alwaysOnTop: true,
-    skipTaskbar: true,
     hasShadow: true,
     // The panel also drives playback/highlight timing while hidden.
     webPreferences: { ...webPreferences(), backgroundThrottling: false }
   })
+  configureOverlay(win)
   win.setAlwaysOnTop(true, 'floating')
-  if (!windows) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  const saveBounds = () => updateSettings({ panelBounds: win.getBounds() })
+  const saveBounds = () => {
+    const bounds = win.getBounds()
+    const preferred = defaultReaderBounds()
+    if (!getSettings().panelBounds && bounds.width === preferred.width && bounds.height === preferred.height &&
+      Math.abs(bounds.x - preferred.x) <= 1 && Math.abs(bounds.y - preferred.y) <= 1) return
+    updateSettings({ panelBounds: bounds })
+  }
   win.on('moved', saveBounds)
   win.on('resized', saveBounds)
   win.on('closed', () => {
@@ -98,7 +134,7 @@ function openSettings(): void {
     width: 460,
     height: Math.min(800, workArea.height),
     useContentSize: true,
-    resizable: false,
+    resizable: true,
     fullscreenable: false,
     maximizable: false,
     title: 'Kokoro Reader Settings',
@@ -109,7 +145,7 @@ function openSettings(): void {
   })
   settingsWin.on('closed', () => (settingsWin = null))
   loadRenderer(settingsWin, 'settings')
-  // Fit window to content so no scrolling is needed (capped to the display).
+  // Fit the initial height to the contents and leave vertical resizing available.
   const win = settingsWin
   win.webContents.once('did-finish-load', async () => {
     try {
@@ -120,6 +156,8 @@ function openSettings(): void {
       const maxHeight = Math.max(1, area.height - frameHeight - 16)
       win.setContentSize(460, Math.min(Math.max(contentHeight, 400), maxHeight))
       const resized = win.getBounds()
+      win.setMinimumSize(resized.width, Math.min(360, resized.height))
+      win.setMaximumSize(resized.width, Math.max(...screen.getAllDisplays().map((display) => display.workArea.height)))
       const y = Math.min(Math.max(resized.y, area.y), area.y + area.height - resized.height)
       if (resized.y !== y) win.setPosition(resized.x, y)
     } catch {
@@ -131,20 +169,76 @@ function openSettings(): void {
   })
 }
 
-function createPreparingWindow(): BrowserWindow {
+function playbackBounds(): Rectangle {
+  const { playbackControlsPosition: position } = getSettings()
+  const { width, height } = PLAYBACK_CONTROLS_SIZE
+  const display = position ? screen.getDisplayMatching({ ...position, width, height }) : screen.getPrimaryDisplay()
+  const area = display.workArea
+  const right = area.x + area.width - width
+  const bottom = area.y + area.height - height
+  return {
+    x: Math.max(area.x, Math.min(position?.x ?? right - WINDOW_MARGIN, right)),
+    y: Math.max(area.y, Math.min(position?.y ?? bottom - WINDOW_MARGIN, bottom)),
+    width,
+    height
+  }
+}
+
+function createPlaybackWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    show: false,
-    frame: false,
-    transparent: true,
+    ...overlayOptions,
+    ...playbackBounds(),
     resizable: false,
     focusable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
+    acceptFirstMouse: true,
     hasShadow: false,
     webPreferences: webPreferences()
   })
+  configureOverlay(win)
+  win.on('moved', () => {
+    const [x, y] = win.getPosition()
+    const preferred = playbackBounds()
+    if (Math.abs(x - preferred.x) <= 1 && Math.abs(y - preferred.y) <= 1) return
+    const wasDefault = !getSettings().playbackControlsPosition
+    updateSettings({ playbackControlsPosition: { x, y } })
+    if (wasDefault) positionDefaultReader()
+  })
+  win.on('closed', () => {
+    playbackWin = null
+    playbackReady = false
+  })
+  win.webContents.once('did-finish-load', () => {
+    playbackReady = true
+    updatePlaybackControls()
+  })
+  loadRenderer(win, 'playback')
+  return win
+}
+
+function updatePlaybackControls(): void {
+  if (readStatus !== 'reading' || !getSettings().showPlaybackControls) {
+    playbackWin?.hide()
+    return
+  }
+  const win = playbackWin ??= createPlaybackWindow()
+  if (!playbackReady) return
+  safeSend(win, 'playback-controls:paused', playbackPaused)
+  if (!win.isVisible()) {
+    win.setBounds(playbackBounds())
+    win.showInactive()
+  }
+}
+
+function createPreparingWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    ...overlayOptions,
+    resizable: false,
+    focusable: false,
+    hasShadow: false,
+    webPreferences: webPreferences()
+  })
+  configureOverlay(win)
   win.setIgnoreMouseEvents(true)
-  if (!windows) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   win.on('closed', () => { preparingWin = null })
   loadRenderer(win, 'preparing')
   return win
@@ -196,9 +290,10 @@ function readText(text: string, sourceHighlight = false): void {
     return
   }
   stopReading(false)
-  const { voice, speed, showPanel, highlightInSource, joinLines, expandWords } = getSettings()
+  const { voice, showPanel, highlightInSource, joinLines, expandWords } = getSettings()
   const id = randomUUID()
   currentId = id
+  speech = { generationId: id, text, voice, joinLines, expandWords }
   currentSourceHighlight = sourceHighlight && highlightInSource
   setReadStatus('preparing')
   rebuildMenu()
@@ -207,7 +302,8 @@ function readText(text: string, sourceHighlight = false): void {
   const win = readerWin
   const start = () => {
     if (currentId !== id) return
-    safeSend(win, 'reader:start', { id, text })
+    const { speed } = getSettings()
+    safeSend(win, 'reader:start', { id, text, speed })
     engine.speak(id, text, voice, speed, joinLines, expandWords)
   }
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', start)
@@ -264,7 +360,9 @@ function updateTrayIcon(): void {
 function setReadStatus(status: ReadStatus): void {
   if (readStatus === status) return
   readStatus = status
+  if (status !== 'reading') playbackPaused = false
   updatePreparingOverlay()
+  updatePlaybackControls()
   clearInterval(spinnerTimer)
   spinnerTimer = undefined
   if (status === 'preparing' && traySpinnerFrames.length) {
@@ -281,12 +379,13 @@ function clearRead(status: 'idle' | 'failed' = 'idle'): void {
   // switch the source app's accessibility tree back off before we highlight in it.
   if (currentId) helper.clear()
   currentId = null
+  speech = null
   currentSourceHighlight = false
   setReadStatus(status)
 }
 
 function stopReading(hide = true): void {
-  if (currentId) engine.cancel(currentId)
+  if (speech) engine.cancel(speech.generationId)
   clearRead()
   if (hide) {
     safeSend(readerWin, 'reader:stop')
@@ -434,8 +533,17 @@ function wireIpc(): void {
       if (currentId) stopReading()
       engine.setModel(next.model)
     }
+    if (speech && next.speed !== prev.speed) {
+      engine.setSpeed(speech.generationId, next.speed)
+      safeSend(readerWin, 'reader:speed', currentId, next.speed)
+    }
     if (patch.showPanel === false && currentId) readerWin?.hide()
     if (next.showPreparingOverlay !== prev.showPreparingOverlay) updatePreparingOverlay()
+    if ('playbackControlsPosition' in patch) playbackWin?.setBounds(playbackBounds())
+    if (next.showPlaybackControls !== prev.showPlaybackControls || 'playbackControlsPosition' in patch) {
+      positionDefaultReader()
+      updatePlaybackControls()
+    }
     if (preparingWin?.isVisible()) updatePreparationShortcut(preparingWin)
     if (patch.highlightInSource === false) {
       currentSourceHighlight = false
@@ -457,12 +565,31 @@ function wireIpc(): void {
     setReadStatus('reading')
     rebuildMenu()
   })
+  ipcMain.on('reader:playback-paused', (_e, id: string, paused: boolean) => {
+    if (id !== currentId || readStatus !== 'reading') return
+    playbackPaused = paused
+    updatePlaybackControls()
+  })
+  ipcMain.on('playback-controls:command', (event, command: PlaybackCommand) => {
+    if (event.sender !== playbackWin?.webContents || !currentId || readStatus !== 'reading') return
+    if (command === 'stop') stopReading()
+    else if (command === 'rewind' || command === 'forward' || command === 'toggle') {
+      safeSend(readerWin, 'reader:command', currentId, command)
+    }
+  })
   ipcMain.on('reader:playback-failed', (_e, id: string, message: string) => {
     if (id !== currentId) return
     console.error('[kokoro] playback failed:', message)
-    engine.cancel(id)
+    if (speech) engine.cancel(speech.generationId)
     clearRead('failed')
     rebuildMenu()
+  })
+  ipcMain.on('reader:regenerate', (event, id: string, generationId: string, startSeq: number) => {
+    if (event.sender !== readerWin?.webContents || !speech || id !== currentId || readStatus !== 'reading' ||
+      !Number.isSafeInteger(startSeq) || startSeq < 0) return
+    engine.cancel(speech.generationId)
+    speech.generationId = generationId
+    engine.speak(generationId, speech.text, speech.voice, getSettings().speed, speech.joinLines, speech.expandWords, startSeq)
   })
   ipcMain.on('reader:word', (_e, id: string, from: number, to: number, text: string) => {
     if (id === currentId && currentSourceHighlight) helper.highlight(from, to, text)
@@ -482,14 +609,16 @@ function wireEngine(): void {
     for (const w of BrowserWindow.getAllWindows()) safeSend(w, 'status', s)
   })
   engine.on('chunk', (chunk) => {
-    if (chunk.id === currentId) safeSend(readerWin, 'reader:chunk', chunk)
+    if (chunk.id === speech?.generationId) {
+      safeSend(readerWin, 'reader:chunk', { ...chunk, id: currentId, generationId: chunk.id })
+    }
   })
   engine.on('done', (id: string) => {
-    if (id === currentId) safeSend(readerWin, 'reader:done', id)
+    if (id === speech?.generationId) safeSend(readerWin, 'reader:done', currentId, id)
   })
   engine.on('error', (id: string | null, message: string) => {
     console.error('[kokoro]', message)
-    if (id === null || id === currentId) {
+    if (id === null || id === speech?.generationId) {
       if (currentId) {
         clearRead('failed')
         rebuildMenu()

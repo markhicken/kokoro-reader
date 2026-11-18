@@ -51,12 +51,14 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const voiceEl = $<HTMLSelectElement>('voice')
 const speedEl = $<HTMLInputElement>('speed')
 const speedValue = $('speedValue')
+const speedWarning = $('speedWarning')
 const modelEl = $<HTMLSelectElement>('model')
 const hotkeyEl = $<HTMLButtonElement>('hotkey')
 const hotkeyHint = $('hotkeyHint')
 const defaultHotkeyHint = hotkeyHint.textContent
 const showPanelEl = $<HTMLInputElement>('showPanel')
 const showPreparingOverlayEl = $<HTMLInputElement>('showPreparingOverlay')
+const showPlaybackControlsEl = $<HTMLInputElement>('showPlaybackControls')
 const highlightEl = $<HTMLInputElement>('highlightInSource')
 const joinLinesEl = $<HTMLInputElement>('joinLines')
 const expandWordsEl = $<HTMLInputElement>('expandWords')
@@ -87,6 +89,7 @@ if (api.windows) {
 
 function setSpeedLabel(speed: number): void {
   speedValue.textContent = `${speed.toFixed(2)}×`
+  speedWarning.hidden = speed <= 1.35
   const fill = ((speed - Number(speedEl.min)) / (Number(speedEl.max) - Number(speedEl.min))) * 100
   speedEl.style.setProperty('--fill', `${fill}%`)
 }
@@ -99,6 +102,7 @@ function render(s: Settings): void {
   if (!recording) hotkeyEl.textContent = formatHotkey(s.hotkey, api.windows)
   showPanelEl.checked = s.showPanel
   showPreparingOverlayEl.checked = s.showPreparingOverlay
+  showPlaybackControlsEl.checked = s.showPlaybackControls
   highlightEl.checked = s.highlightInSource
   joinLinesEl.checked = s.joinLines
   expandWordsEl.checked = s.expandWords
@@ -123,6 +127,8 @@ speedEl.addEventListener('change', () => save({ speed: Number(speedEl.value) }))
 modelEl.addEventListener('change', () => save({ model: modelEl.value as ModelVariant }))
 showPanelEl.addEventListener('change', () => save({ showPanel: showPanelEl.checked }))
 showPreparingOverlayEl.addEventListener('change', () => save({ showPreparingOverlay: showPreparingOverlayEl.checked }))
+showPlaybackControlsEl.addEventListener('change', () => save({ showPlaybackControls: showPlaybackControlsEl.checked }))
+$('resetPlaybackPosition').addEventListener('click', () => save({ playbackControlsPosition: null }))
 highlightEl.addEventListener('change', () => save({ highlightInSource: highlightEl.checked }))
 joinLinesEl.addEventListener('change', () => save({ joinLines: joinLinesEl.checked }))
 expandWordsEl.addEventListener('change', () => save({ expandWords: expandWordsEl.checked }))

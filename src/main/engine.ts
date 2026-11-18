@@ -130,12 +130,16 @@ export class KokoroEngine extends EventEmitter {
     this.start()
   }
 
-  speak(id: string, text: string, voice: string, speed: number, joinLines: boolean, expandWords: boolean): void {
+  speak(id: string, text: string, voice: string, speed: number, joinLines: boolean, expandWords: boolean, startSeq = 0): void {
     if (!this.proc) {
       this.retried = false
       this.start()
     }
-    this.send({ id, cmd: 'speak', text, voice, speed, joinLines, expandWords })
+    this.send({ id, cmd: 'speak', text, voice, speed, joinLines, expandWords, startSeq })
+  }
+
+  setSpeed(id: string, speed: number): void {
+    this.send({ id, cmd: 'speed', speed })
   }
 
   cancel(id: string): void {

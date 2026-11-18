@@ -7,12 +7,15 @@ const statusEl = $('status')
 const pauseBtn = $<HTMLButtonElement>('pause')
 const textEl = $('text')
 const scroller = $('scroller')
+const SKIP_SECONDS = 10
 
 let jobId: string | null = null
+let generationId: string | null = null
+let speed = 1
+let pendingSeek: { seq: number; fraction: number; wordOffset?: number } | undefined
 const player = new Player()
 let highlighter: Highlighter | null = null
 let generationDone = false
-let firstAudioAt: number | undefined
 let playbackStarted = false
 let timer: ReturnType<typeof setInterval> | undefined
 
@@ -21,8 +24,9 @@ function setStatus(text: string): void {
 }
 
 function updateReadStatus(): void {
-  document.body.classList.toggle('busy', !player.paused && !playbackStarted)
-  setStatus(player.paused ? 'Paused' : playbackStarted ? 'Reading' : 'Preparing audio…')
+  const preparing = !playbackStarted || pendingSeek !== undefined
+  document.body.classList.toggle('busy', !player.paused && preparing)
+  setStatus(player.paused ? 'Paused' : preparing ? 'Preparing audio…' : 'Reading')
 }
 
 function reset(): void {
@@ -31,23 +35,24 @@ function reset(): void {
   player.stop()
   highlighter = null
   jobId = null
-  firstAudioAt = undefined
+  generationId = null
+  pendingSeek = undefined
   playbackStarted = false
 }
 
 // A timer (not requestAnimationFrame) so timing keeps running while the panel is hidden.
 function tick(): void {
   if (!highlighter || !jobId) return
-  const t = player.outputTime
-  if (!playbackStarted && firstAudioAt !== undefined && t >= firstAudioAt &&
-    player.ctx.state === 'running' && !player.paused) {
+  if (!playbackStarted && player.started) {
     playbackStarted = true
     updateReadStatus()
     api.playbackStarted(jobId)
   }
-  const word = highlighter.update(t)
-  if (word) api.reportWord(jobId, word.from, word.to, word.text)
-  if (generationDone && (firstAudioAt === undefined || t >= player.endTime)) finish()
+  if (playbackStarted) {
+    const word = highlighter.update(player.position)
+    if (word) api.reportWord(jobId, word.from, word.to, word.text)
+  }
+  if (generationDone && !pendingSeek && player.drained) finish()
 }
 
 function finish(): void {
@@ -69,9 +74,11 @@ function failPlayback(id: string, error: unknown): void {
   api.playbackFailed(id, message)
 }
 
-api.onReaderStart(({ id, text }) => {
+api.onReaderStart(({ id, text, speed: initialSpeed }) => {
   reset()
   jobId = id
+  generationId = id
+  speed = initialSpeed
   generationDone = false
   void player.begin().catch((error) => failPlayback(id, error))
   highlighter = new Highlighter(textEl, scroller, text)
@@ -82,19 +89,35 @@ api.onReaderStart(({ id, text }) => {
 })
 
 api.onChunk((chunk) => {
-  if (chunk.id !== jobId || !highlighter) return
+  if (chunk.id !== jobId || chunk.generationId !== generationId || !highlighter) return
   try {
-    const { start } = player.enqueue(chunk.pcm, chunk.sr)
-    firstAudioAt ??= start
-    highlighter.addWords(chunk.words, start)
+    const seek = pendingSeek
+    if (seek) {
+      player.discardFrom(seek.seq)
+      highlighter.discardFrom(seek.seq)
+    }
+    const { start, duration } = player.enqueue(chunk, !seek)
+    highlighter.addWords(chunk.seq, chunk.words, start)
+    if (seek) {
+      const wordStart = seek.wordOffset === undefined ? undefined : highlighter.startForOffset(seek.wordOffset)
+      const target = wordStart ?? (chunk.seq === seek.seq ? start + seek.fraction * duration : start)
+      player.seek(target)
+      pendingSeek = undefined
+      updateReadStatus()
+    }
   } catch (error) {
     failPlayback(chunk.id, error)
   }
 })
 
-api.onDone((id) => {
-  if (id !== jobId) return
+api.onDone((id, completedGeneration) => {
+  if (id !== jobId || completedGeneration !== generationId) return
+  pendingSeek = undefined
   generationDone = true
+})
+
+api.onReaderSpeed((id, nextSpeed) => {
+  if (id === jobId) speed = nextSpeed
 })
 
 api.onStop(() => {
@@ -109,6 +132,11 @@ api.onMessage((message) => {
 })
 
 api.onError(showReadError)
+api.onPlaybackCommand((id, command) => {
+  if (id !== jobId) return
+  if (command === 'toggle') void togglePause()
+  else skip(command === 'rewind' ? -SKIP_SECONDS : SKIP_SECONDS)
+})
 
 pauseBtn.addEventListener('click', togglePause)
 $('stop').addEventListener('click', stop)
@@ -118,8 +146,39 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === ' ') {
     e.preventDefault()
     togglePause()
+  } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && playbackStarted) {
+    e.preventDefault()
+    skip(e.key === 'ArrowLeft' ? -SKIP_SECONDS : SKIP_SECONDS)
   }
 })
+
+function skip(seconds: number): void {
+  if (!jobId || !highlighter || !playbackStarted) return
+  const target = Math.min(player.duration, Math.max(0, player.position + seconds))
+  const word = highlighter.wordAt(target)
+  const position = word?.start ?? target
+  try {
+    const chunk = player.chunkAt(position)
+    if (chunk && (pendingSeek || player.needsRegeneration(chunk.seq, speed))) {
+      const nextGeneration = crypto.randomUUID()
+      pendingSeek = {
+        seq: chunk.seq,
+        fraction: (position - chunk.start) / chunk.duration,
+        wordOffset: word?.from
+      }
+      generationId = nextGeneration
+      generationDone = false
+      player.hold(position)
+      api.regenerateForSeek(jobId, nextGeneration, chunk.seq)
+      updateReadStatus()
+    } else {
+      player.seek(position)
+    }
+    tick()
+  } catch (error) {
+    failPlayback(jobId, error)
+  }
+}
 
 async function togglePause(): Promise<void> {
   const id = jobId
@@ -133,6 +192,7 @@ async function togglePause(): Promise<void> {
   if (id !== jobId) return
   pauseBtn.textContent = player.paused ? '▶' : '⏸'
   updateReadStatus()
+  api.playbackPaused(id, player.paused)
 }
 
 function stop(): void {
