@@ -28,7 +28,7 @@ export class AccessibilityHelper {
 
   start(): void {
     if (this.proc) return
-    const proc = spawn(this.path, this.showWindowsHighlight ? [String(process.pid)] : [], { windowsHide: true })
+    const proc = spawn(this.path, [String(process.pid)], { windowsHide: true })
     this.proc = proc
     createInterface({ input: proc.stdout }).on('line', (line) => {
       if (this.proc !== proc) return
@@ -105,6 +105,11 @@ export class AccessibilityHelper {
       }
       this.send(this.showWindowsHighlight ? (fromTray ? 'capture tray' : 'capture') : { cmd: 'capture' })
     })
+  }
+
+  /** Return focus to the source app if clicking Kokoro Reader's own window took it. */
+  refocus(): void {
+    this.send(this.showWindowsHighlight ? 'refocus' : { cmd: 'refocus' })
   }
 
   /** Whether the helper's Accessibility calls actually work (false for missing, revoked or stale grants). */

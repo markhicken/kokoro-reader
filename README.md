@@ -45,7 +45,7 @@ Python and the platform's locked dependencies. Initial setup and the first use o
 ```text
 npm ci
 npm run dev
-npm run dist -- --publish never
+npm run build
 ```
 
 The installer goes in `dist/`. macOS produces `Kokoro Reader-<version>-arm64.dmg` and Windows produces

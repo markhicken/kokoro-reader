@@ -35,7 +35,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: npm ci
       - run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
-      - run: npm run dist -- --publish never
+      - run: npm run build
       - run: node scripts/check-package.mjs
       - uses: actions/upload-artifact@v4
         with:
@@ -56,7 +56,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: npm ci
       - run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
-      - run: npm run dist -- --publish never
+      - run: npm run build
       - run: node scripts/check-package.mjs
       - uses: actions/upload-artifact@v4
         with:

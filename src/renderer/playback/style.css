@@ -62,11 +62,8 @@ button:hover, button:focus-visible {
   border-left-color: currentColor;
 }
 
-.skip {
-  font-size: 19px;
-  line-height: 15px;
-}
-
-small {
-  font: 600 9px/9px system-ui, sans-serif;
+.skip svg {
+  display: block;
+  width: 24px;
+  height: 24px;
 }

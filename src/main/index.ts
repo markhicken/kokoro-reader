@@ -199,6 +199,8 @@ function createPlaybackWindow(): BrowserWindow {
     ...playbackBounds(),
     resizable: false,
     focusable: false,
+    // A non-activating panel keeps the source app focused (and its highlight alive) when clicked.
+    ...(!windows && { type: 'panel' }),
     acceptFirstMouse: true,
     hasShadow: false,
     webPreferences: webPreferences()
@@ -643,6 +645,7 @@ function wireIpc(): void {
   })
   ipcMain.on('playback-controls:command', (event, command: PlaybackCommand) => {
     if (event.sender !== playbackWin?.webContents || !currentId || readStatus !== 'reading') return
+    helper.refocus()
     if (command === 'stop') stopReading()
     else if (command === 'rewind' || command === 'forward' || command === 'toggle') {
       safeSend(readerWin, 'reader:command', currentId, command)

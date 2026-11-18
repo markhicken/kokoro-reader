@@ -6,13 +6,11 @@
   "license": "GPL-3.0-only",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "npm run build:native && electron-vite dev",
-    "build": "npm run build:native && electron-vite build",
+    "dev": "node scripts/build.mjs native && electron-vite dev",
+    "build": "node scripts/build.mjs",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/build.mjs install",
-    "dist": "node scripts/build.mjs dist",
-    "build:native": "node scripts/build.mjs native"
+    "postinstall": "node scripts/build.mjs install"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

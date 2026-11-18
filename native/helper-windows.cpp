@@ -54,13 +54,20 @@ bool external(HWND window) {
         windowClass != L"#32768";
 }
 
+// Kokoro Reader's own windows (reader panel, playback controls) may take focus without ending the highlight.
+bool ours(HWND window) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    return pid && pid == readerPid;
+}
+
 void trackFocus() {
     while (running) {
         const auto focus = foreground();
         {
             std::lock_guard<std::mutex> lock(stateMutex);
             if (external(focus.window)) lastExternal = focus;
-            if (highlighted.window &&
+            if (highlighted.window && !ours(focus.window) &&
                 (highlighted.window != focus.window || highlighted.control != focus.control)) {
                 highlighted = {};
                 send(R"({"type":"hide"})");
@@ -232,6 +239,11 @@ int main(int argc, char** argv) {
             if (selection.text.empty()) send(R"({"type":"capture","ok":false,"error":"noselection"})");
             else send("{\"type\":\"capture\",\"ok\":true,\"text\":" + jsonString(selection.text) +
                 ",\"sourceHighlight\":" + (selection.range ? "true" : "false") + "}");
+        } else if (line == "refocus") {
+            // Best effort: the helper was started by Kokoro Reader, which lets it set the foreground window.
+            if (ours(GetForegroundWindow()) && IsWindow(selection.focus.window) && !IsIconic(selection.focus.window)) {
+                SetForegroundWindow(selection.focus.window);
+            }
         } else if (line == "clear") {
             selection = {};
             std::lock_guard<std::mutex> lock(stateMutex);
@@ -243,6 +255,10 @@ int main(int argc, char** argv) {
             if (!(input >> command >> request >> from >> to) || command != "highlight") continue;
             auto focus = foreground();
             const auto matches = [&] {
+                if (ours(focus.window)) {
+                    return IsWindow(selection.focus.window) && IsWindowVisible(selection.focus.window) &&
+                        !IsIconic(selection.focus.window);
+                }
                 return focus.window == selection.focus.window &&
                     (!selection.focus.control || focus.control == selection.focus.control);
             };
@@ -250,7 +266,7 @@ int main(int argc, char** argv) {
             std::lock_guard<std::mutex> lock(stateMutex);
             focus = foreground();
             if (!matches()) bounds = "null";
-            highlighted = bounds == "null" ? WindowFocus{} : focus;
+            highlighted = bounds == "null" ? WindowFocus{} : (ours(focus.window) ? selection.focus : focus);
             send("{\"type\":\"rect\",\"request\":" + std::to_string(request) + ",\"bounds\":" + bounds + "}");
         }
     }
