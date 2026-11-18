@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'" />
+    <title>Kokoro Reader — Preparing</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main role="status">
+      <span class="spinner" aria-hidden="true"></span>
+      <div>
+        <p class="title">Preparing to read…</p>
+        <p class="hint" id="shortcutHint" hidden>Press <kbd id="shortcut"></kbd> to cancel</p>
+        <p class="hint" id="trayHint" hidden>Use Stop in the Kokoro Reader tray to cancel</p>
+      </div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

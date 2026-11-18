@@ -8,6 +8,8 @@ export interface Settings {
   autoClosePanel: boolean
   /** Show the floating reader panel while reading. */
   showPanel: boolean
+  /** Show a centered status while waiting for audio to begin. */
+  showPreparingOverlay: boolean
   /** Highlight the spoken word in the app the text was selected from. */
   highlightInSource: boolean
   /** Merge hard-wrapped lines into one sentence before speaking. */
@@ -40,6 +42,8 @@ export interface KokoroApi {
   preview(): void
   suspendHotkey(suspend: boolean): void
   stop(): void
+  playbackStarted(id: string): void
+  playbackFailed(id: string, message: string): void
   reportWord(id: string, from: number, to: number, text: string): void
   finished(id: string): void
   onReaderStart(cb: (job: { id: string; text: string }) => void): void
@@ -49,5 +53,6 @@ export interface KokoroApi {
   onMessage(cb: (message: string) => void): void
   onError(cb: (message: string) => void): void
   onStatus(cb: (status: EngineStatus) => void): void
+  onPreparationShortcut(cb: (hotkey: string | null) => void): void
   getStatus(): Promise<EngineStatus>
 }

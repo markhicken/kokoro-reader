@@ -12,6 +12,7 @@ const DEFAULTS: Settings = {
   hotkey: windows ? 'Control+Alt+Space' : 'Alt+Shift+Space',
   autoClosePanel: true,
   showPanel: true,
+  showPreparingOverlay: true,
   highlightInSource: true,
   joinLines: true,
   expandWords: true

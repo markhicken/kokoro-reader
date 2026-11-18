@@ -55,6 +55,12 @@ export class Player {
     return this.nextStart
   }
 
+  /** The position playing at the output device, on the same clock used to schedule audio. */
+  get outputTime(): number {
+    const { contextTime, performanceTime } = this.ctx.getOutputTimestamp()
+    return (performanceTime ?? 0) > 0 && contextTime !== undefined ? contextTime : this.ctx.currentTime
+  }
+
   get paused(): boolean {
     return this.userPaused
   }

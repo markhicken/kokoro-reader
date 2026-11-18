@@ -15,6 +15,8 @@ const api: KokoroApi = {
   preview: () => ipcRenderer.send('preview'),
   suspendHotkey: (suspend) => ipcRenderer.send('hotkey:suspend', suspend),
   stop: () => ipcRenderer.send('stop'),
+  playbackStarted: (id) => ipcRenderer.send('reader:playback-started', id),
+  playbackFailed: (id, message) => ipcRenderer.send('reader:playback-failed', id, message),
   reportWord: (id, from, to, text) => ipcRenderer.send('reader:word', id, from, to, text),
   finished: (id) => ipcRenderer.send('reader:finished', id),
   onReaderStart: on('reader:start'),
@@ -23,7 +25,8 @@ const api: KokoroApi = {
   onStop: on('reader:stop'),
   onMessage: on('reader:message'),
   onError: on('reader:error'),
-  onStatus: on('status')
+  onStatus: on('status'),
+  onPreparationShortcut: on('preparing:shortcut')
 }
 
 contextBridge.exposeInMainWorld('kokoro', api)

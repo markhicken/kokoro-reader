@@ -1,4 +1,5 @@
 import type { EngineStatus, ModelVariant, Settings } from '../../shared/types'
+import { formatHotkey } from '../../shared/hotkey'
 
 const api = window.kokoro
 
@@ -55,6 +56,7 @@ const hotkeyEl = $<HTMLButtonElement>('hotkey')
 const hotkeyHint = $('hotkeyHint')
 const defaultHotkeyHint = hotkeyHint.textContent
 const showPanelEl = $<HTMLInputElement>('showPanel')
+const showPreparingOverlayEl = $<HTMLInputElement>('showPreparingOverlay')
 const highlightEl = $<HTMLInputElement>('highlightInSource')
 const joinLinesEl = $<HTMLInputElement>('joinLines')
 const expandWordsEl = $<HTMLInputElement>('expandWords')
@@ -83,15 +85,6 @@ if (api.windows) {
   $('sourceHighlightCaption').textContent = 'Marks each word in apps that expose text positions to Windows.'
 }
 
-const SYMBOLS: Record<string, string> = { Command: '⌘', Control: '⌃', Alt: '⌥', Shift: '⇧', Space: 'Space' }
-/** "Alt+Shift+Space" → "⌥⇧ Space" */
-function prettyHotkey(accel: string): string {
-  const parts = accel.split('+')
-  if (api.windows) return parts.map((part) => part === 'Control' ? 'Ctrl' : part === 'Super' ? 'Win' : part).join(' + ')
-  const key = parts.pop()!
-  return parts.map((p) => SYMBOLS[p] ?? p).join('') + ' ' + key
-}
-
 function setSpeedLabel(speed: number): void {
   speedValue.textContent = `${speed.toFixed(2)}×`
   const fill = ((speed - Number(speedEl.min)) / (Number(speedEl.max) - Number(speedEl.min))) * 100
@@ -103,8 +96,9 @@ function render(s: Settings): void {
   speedEl.value = String(s.speed)
   setSpeedLabel(s.speed)
   modelEl.value = s.model
-  if (!recording) hotkeyEl.textContent = prettyHotkey(s.hotkey)
+  if (!recording) hotkeyEl.textContent = formatHotkey(s.hotkey, api.windows)
   showPanelEl.checked = s.showPanel
+  showPreparingOverlayEl.checked = s.showPreparingOverlay
   highlightEl.checked = s.highlightInSource
   joinLinesEl.checked = s.joinLines
   expandWordsEl.checked = s.expandWords
@@ -128,6 +122,7 @@ speedEl.addEventListener('input', () => setSpeedLabel(Number(speedEl.value)))
 speedEl.addEventListener('change', () => save({ speed: Number(speedEl.value) }))
 modelEl.addEventListener('change', () => save({ model: modelEl.value as ModelVariant }))
 showPanelEl.addEventListener('change', () => save({ showPanel: showPanelEl.checked }))
+showPreparingOverlayEl.addEventListener('change', () => save({ showPreparingOverlay: showPreparingOverlayEl.checked }))
 highlightEl.addEventListener('change', () => save({ highlightInSource: highlightEl.checked }))
 joinLinesEl.addEventListener('change', () => save({ joinLines: joinLinesEl.checked }))
 expandWordsEl.addEventListener('change', () => save({ expandWords: expandWordsEl.checked }))
@@ -200,7 +195,7 @@ window.addEventListener(
     void save({ hotkey })
       .then((settings) => {
         hotkeyHint.textContent = api.windows && settings.hotkey !== hotkey
-          ? `${prettyHotkey(hotkey)} is unavailable.` : defaultHotkeyHint
+          ? `${formatHotkey(hotkey, api.windows)} is unavailable.` : defaultHotkeyHint
       })
       .catch(() => {
         hotkeyHint.textContent = 'Couldn’t save the shortcut. Try again.'

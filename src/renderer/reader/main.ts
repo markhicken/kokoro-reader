@@ -1,4 +1,3 @@
-import type { EngineStatus } from '../../shared/types'
 import { Highlighter } from './highlight'
 import { Player } from './player'
 
@@ -13,33 +12,42 @@ let jobId: string | null = null
 const player = new Player()
 let highlighter: Highlighter | null = null
 let generationDone = false
+let firstAudioAt: number | undefined
+let playbackStarted = false
 let timer: ReturnType<typeof setInterval> | undefined
-let engineStatus: EngineStatus = 'loading'
 
 function setStatus(text: string): void {
   statusEl.textContent = text
 }
 
-/** Show the spinner while audio is still being generated. */
-function setBusy(busy: boolean): void {
-  document.body.classList.toggle('busy', busy)
+function updateReadStatus(): void {
+  document.body.classList.toggle('busy', !player.paused && !playbackStarted)
+  setStatus(player.paused ? 'Paused' : playbackStarted ? 'Reading' : 'Preparing audio…')
 }
 
 function reset(): void {
   clearInterval(timer)
-  setBusy(false)
+  document.body.classList.remove('busy')
   player.stop()
   highlighter = null
   jobId = null
+  firstAudioAt = undefined
+  playbackStarted = false
 }
 
 // A timer (not requestAnimationFrame) so timing keeps running while the panel is hidden.
 function tick(): void {
   if (!highlighter || !jobId) return
-  const t = player.ctx.currentTime
+  const t = player.outputTime
+  if (!playbackStarted && firstAudioAt !== undefined && t >= firstAudioAt &&
+    player.ctx.state === 'running' && !player.paused) {
+    playbackStarted = true
+    updateReadStatus()
+    api.playbackStarted(jobId)
+  }
   const word = highlighter.update(t)
   if (word) api.reportWord(jobId, word.from, word.to, word.text)
-  if (generationDone && t >= player.endTime) finish()
+  if (generationDone && (firstAudioAt === undefined || t >= player.endTime)) finish()
 }
 
 function finish(): void {
@@ -49,35 +57,44 @@ function finish(): void {
   api.finished(id)
 }
 
-api.onStatus((s) => {
-  engineStatus = s
-  if (s === 'loading') setStatus('Loading model…')
-})
+function showReadError(message: string): void {
+  reset()
+  setStatus(`Error: ${message}`)
+}
+
+function failPlayback(id: string, error: unknown): void {
+  if (id !== jobId) return
+  const message = error instanceof Error ? error.message : String(error)
+  showReadError(message)
+  api.playbackFailed(id, message)
+}
 
 api.onReaderStart(({ id, text }) => {
   reset()
   jobId = id
   generationDone = false
-  setBusy(true)
-  void player.begin()
+  void player.begin().catch((error) => failPlayback(id, error))
   highlighter = new Highlighter(textEl, scroller, text)
   scroller.scrollTop = 0
   pauseBtn.textContent = '⏸'
-  setStatus(engineStatus === 'ready' ? 'Generating…' : 'Loading model…')
+  updateReadStatus()
   timer = setInterval(tick, 20)
 })
 
 api.onChunk((chunk) => {
   if (chunk.id !== jobId || !highlighter) return
-  const { start } = player.enqueue(chunk.pcm, chunk.sr)
-  highlighter.addWords(chunk.words, start)
-  setStatus('Reading')
+  try {
+    const { start } = player.enqueue(chunk.pcm, chunk.sr)
+    firstAudioAt ??= start
+    highlighter.addWords(chunk.words, start)
+  } catch (error) {
+    failPlayback(chunk.id, error)
+  }
 })
 
 api.onDone((id) => {
   if (id !== jobId) return
   generationDone = true
-  setBusy(false)
 })
 
 api.onStop(() => {
@@ -91,10 +108,7 @@ api.onMessage((message) => {
   setStatus('Kokoro')
 })
 
-api.onError((message) => {
-  setBusy(false)
-  setStatus(`Error: ${message}`)
-})
+api.onError(showReadError)
 
 pauseBtn.addEventListener('click', togglePause)
 $('stop').addEventListener('click', stop)
@@ -108,15 +122,20 @@ document.addEventListener('keydown', (e) => {
 })
 
 async function togglePause(): Promise<void> {
-  if (!jobId) return
-  await player.toggle()
+  const id = jobId
+  if (!id) return
+  try {
+    await player.toggle()
+  } catch (error) {
+    failPlayback(id, error)
+    return
+  }
+  if (id !== jobId) return
   pauseBtn.textContent = player.paused ? '▶' : '⏸'
-  setStatus(player.paused ? 'Paused' : 'Reading')
+  updateReadStatus()
 }
 
 function stop(): void {
   reset()
   api.stop()
 }
-
-api.getStatus().then((s) => (engineStatus = s))

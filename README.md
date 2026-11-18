@@ -62,6 +62,7 @@ The model comes from Hugging Face. Rebuilding the Mac app can require a new Acce
   the shortcut in Settings. On macOS, grant Accessibility permission to Kokoro Reader (or Electron
   in development) in System Settings → Privacy & Security → Accessibility.
 - The tray menu offers Read Selection, Stop, and Settings. Pressing the hotkey while reading also stops.
+- The **Show preparing overlay** setting is on by default. It shows a centered status and the cancel shortcut while audio is preparing.
 - Enable source and reader panel highlighting independently in Settings. Source highlighting works
   where macOS Accessibility or Windows UI Automation can report the position of the selected words.
 - Selection capture uses the OS accessibility API without accessing the clipboard. Source apps need to
