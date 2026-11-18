@@ -52,6 +52,8 @@ const speedEl = $<HTMLInputElement>('speed')
 const speedValue = $('speedValue')
 const modelEl = $<HTMLSelectElement>('model')
 const hotkeyEl = $<HTMLButtonElement>('hotkey')
+const hotkeyHint = $('hotkeyHint')
+const defaultHotkeyHint = hotkeyHint.textContent
 const showPanelEl = $<HTMLInputElement>('showPanel')
 const highlightEl = $<HTMLInputElement>('highlightInSource')
 const joinLinesEl = $<HTMLInputElement>('joinLines')
@@ -68,16 +70,24 @@ const STATUS: Record<EngineStatus, string> = {
 }
 
 for (const [group, voices] of Object.entries(VOICES)) {
+  if (api.windows && /^[jz]/.test(voices[0].id)) continue
   const og = document.createElement('optgroup')
   og.label = group
   for (const v of voices) og.append(new Option(voiceLabel(v), v.id))
   voiceEl.append(og)
 }
 
+if (api.windows) {
+  document.body.classList.add('windows')
+  $('engineOptions').hidden = true
+  $('sourceHighlightCaption').textContent = 'Marks each word in apps that expose text positions to Windows.'
+}
+
 const SYMBOLS: Record<string, string> = { Command: '⌘', Control: '⌃', Alt: '⌥', Shift: '⇧', Space: 'Space' }
 /** "Alt+Shift+Space" → "⌥⇧ Space" */
 function prettyHotkey(accel: string): string {
   const parts = accel.split('+')
+  if (api.windows) return parts.map((part) => part === 'Control' ? 'Ctrl' : part === 'Super' ? 'Win' : part).join(' + ')
   const key = parts.pop()!
   return parts.map((p) => SYMBOLS[p] ?? p).join('') + ' ' + key
 }
@@ -107,7 +117,11 @@ function renderStatus(s: EngineStatus): void {
   statusEl.dataset.status = s
 }
 
-const save = async (patch: Partial<Settings>) => render(await api.setSettings(patch))
+const save = async (patch: Partial<Settings>) => {
+  const settings = await api.setSettings(patch)
+  render(settings)
+  return settings
+}
 
 voiceEl.addEventListener('change', () => save({ voice: voiceEl.value }))
 speedEl.addEventListener('input', () => setSpeedLabel(Number(speedEl.value)))
@@ -126,11 +140,16 @@ const KEY_NAMES: Record<string, string> = {
   Space: 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Escape: 'Escape',
   Enter: 'Return', Backspace: 'Backspace', Tab: 'Tab', Delete: 'Delete'
 }
+const WINDOWS_PUNCTUATION: Record<string, string> = {
+  Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+  Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/'
+}
 let recording = false
 
 function setRecording(on: boolean): void {
   recording = on
   hotkeyEl.classList.toggle('recording', on)
+  hotkeyHint.textContent = defaultHotkeyHint
   // Pause the global hotkey so pressing the current shortcut reaches this page.
   api.suspendHotkey(on)
   if (on) hotkeyEl.textContent = 'Type shortcut…'
@@ -159,7 +178,7 @@ window.addEventListener(
     if (e.code === 'Escape' && !(e.metaKey || e.ctrlKey || e.altKey || e.shiftKey)) return setRecording(false)
     if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return
     const parts: string[] = []
-    if (e.metaKey) parts.push('Command')
+    if (e.metaKey) parts.push(api.windows ? 'Super' : 'Command')
     if (e.ctrlKey) parts.push('Control')
     if (e.altKey) parts.push('Alt')
     if (e.shiftKey) parts.push('Shift')
@@ -167,12 +186,30 @@ window.addEventListener(
     const code = e.code
     const key =
       KEY_NAMES[code] ??
+      (api.windows ? WINDOWS_PUNCTUATION[code] : undefined) ??
       (code.startsWith('Key') ? code.slice(3) : code.startsWith('Digit') ? code.slice(5) : /^F\d+$/.test(code) ? code : null)
-    if (!key) return
+    if (!key) {
+      if (api.windows) hotkeyHint.textContent = 'That key can’t be used in a shortcut. Try another key.'
+      return
+    }
     parts.push(key)
     recording = false
     hotkeyEl.classList.remove('recording')
-    void save({ hotkey: parts.join('+') }).then(() => api.suspendHotkey(false))
+    hotkeyEl.disabled = true
+    const hotkey = parts.join('+')
+    void save({ hotkey })
+      .then((settings) => {
+        hotkeyHint.textContent = api.windows && settings.hotkey !== hotkey
+          ? `${prettyHotkey(hotkey)} is unavailable.` : defaultHotkeyHint
+      })
+      .catch(() => {
+        hotkeyHint.textContent = 'Couldn’t save the shortcut. Try again.'
+        return api.getSettings().then(render)
+      })
+      .finally(() => {
+        api.suspendHotkey(false)
+        hotkeyEl.disabled = false
+      })
   },
   true
 )

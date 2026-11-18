@@ -16,6 +16,7 @@ const MODEL_IDS: Record<ModelVariant, string> = {
 }
 
 function findUv(): string {
+  if (process.platform === 'win32') return 'uv.exe'
   for (const p of [join(homedir(), '.local/bin/uv'), '/opt/homebrew/bin/uv', '/usr/local/bin/uv']) {
     if (existsSync(p)) return p
   }
@@ -29,17 +30,20 @@ export interface EngineOptions {
   uvPath?: string
   /** Where uv should create the virtualenv; defaults to pythonDir/.venv. */
   envDir?: string
+  /** Per-user storage for the Windows model cache and managed Python. */
+  dataDir?: string
 }
 
 /**
- * Manages the Python mlx-audio sidecar. Emits:
+ * Manages the Python synthesis sidecar. Emits:
  *   'status' (EngineStatus), 'chunk' (Chunk), 'done' (id), 'error' (id | null, message)
  */
 export class KokoroEngine extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null
   private status: EngineStatus = 'stopped'
   private model: ModelVariant
-  private stopping = false
+  private retryTimer: ReturnType<typeof setTimeout> | undefined
+  private retried = false
 
   constructor(
     private opts: EngineOptions,
@@ -55,39 +59,68 @@ export class KokoroEngine extends EventEmitter {
 
   start(): void {
     if (this.proc) return
-    this.stopping = false
+    clearTimeout(this.retryTimer)
+    this.retryTimer = undefined
     this.setStatus('loading')
-    const { pythonDir, uvPath, envDir } = this.opts
+    const { pythonDir, uvPath, envDir, dataDir } = this.opts
+    const windows = process.platform === 'win32'
     const env: NodeJS.ProcessEnv = { ...process.env, PYTHONUNBUFFERED: '1' }
-    const args = ['run', '--project', pythonDir]
+    const args = ['run', '--project', windows ? join(pythonDir, 'windows') : pythonDir]
     if (envDir) {
       // Packaged app: Resources is read-only, so keep the venv elsewhere and never touch the lockfile.
       env.UV_PROJECT_ENVIRONMENT = envDir
       args.push('--frozen')
     }
-    args.push('python', join(pythonDir, 'kokoro_server.py'), '--model', MODEL_IDS[this.model])
-    if (this.model === 'fp32') args.push('--dtype', 'float32')
-    const proc = spawn(uvPath ?? findUv(), args, { cwd: pythonDir, env })
+    if (windows) {
+      env.PYTHONIOENCODING = 'utf-8'
+      env.HF_HUB_DISABLE_TELEMETRY = '1'
+      env.HF_HUB_ETAG_TIMEOUT = '2'
+      if (dataDir) env.HF_HOME = join(dataDir, 'models')
+      if (envDir && dataDir) {
+        env.UV_CACHE_DIR = join(dataDir, 'python-cache')
+        env.UV_PYTHON_INSTALL_DIR = join(dataDir, 'python-runtime')
+      }
+      args.push('--managed-python', 'python', join(pythonDir, 'kokoro_windows.py'))
+    } else {
+      args.push('python', join(pythonDir, 'kokoro_server.py'), '--model', MODEL_IDS[this.model])
+      if (this.model === 'fp32') args.push('--dtype', 'float32')
+    }
+    const proc = spawn(uvPath ?? findUv(), args, { cwd: pythonDir, env, windowsHide: true })
     this.proc = proc
 
-    createInterface({ input: proc.stdout }).on('line', (line) => this.handleLine(line))
+    createInterface({ input: proc.stdout }).on('line', (line) => {
+      if (this.proc === proc) this.handleLine(line)
+    })
+    let launchError: Error | undefined
+    proc.on('error', (error) => { launchError = error })
+    proc.stdin.on('error', (error) => console.error(`[kokoro] engine stdin: ${error.message}`))
     proc.stderr.on('data', (d) => console.error(`[kokoro] ${String(d).trimEnd()}`))
-    proc.on('exit', (code) => {
+    proc.on('close', (code) => {
+      if (this.proc !== proc) return
       this.proc = null
-      if (this.stopping) {
-        this.setStatus('stopped')
-        return
+      const retry = !windows || !this.retried
+      if (retry) {
+        this.retried = true
+        this.retryTimer = setTimeout(() => this.start(), 2000)
       }
       this.setStatus('error')
-      this.emit('error', null, `Kokoro engine exited (code ${code}); restarting`)
-      setTimeout(() => this.start(), 2000)
+      const detail = launchError?.message ?? `exit code ${code}`
+      this.emit('error', null, `Kokoro engine stopped (${detail}). ${retry ? 'Restarting…' : 'Read again to retry.'}`)
     })
   }
 
   stop(): void {
-    this.stopping = true
-    this.proc?.kill()
+    clearTimeout(this.retryTimer)
+    this.retryTimer = undefined
+    const proc = this.proc
     this.proc = null
+    if (process.platform === 'win32' && proc?.pid) {
+      // uv launches a separate Python process on Windows. Terminate the entire sidecar tree.
+      const kill = spawn('taskkill.exe', ['/pid', String(proc.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
+      kill.on('error', () => proc.kill())
+    } else {
+      proc?.kill()
+    }
   }
 
   setModel(model: ModelVariant): void {
@@ -98,6 +131,10 @@ export class KokoroEngine extends EventEmitter {
   }
 
   speak(id: string, text: string, voice: string, speed: number, joinLines: boolean, expandWords: boolean): void {
+    if (!this.proc) {
+      this.retried = false
+      this.start()
+    }
     this.send({ id, cmd: 'speak', text, voice, speed, joinLines, expandWords })
   }
 
@@ -106,7 +143,8 @@ export class KokoroEngine extends EventEmitter {
   }
 
   private send(msg: object): void {
-    this.proc?.stdin.write(JSON.stringify(msg) + '\n')
+    const stdin = this.proc?.stdin
+    if (stdin?.writable) stdin.write(JSON.stringify(msg) + '\n')
   }
 
   private setStatus(s: EngineStatus): void {
@@ -123,6 +161,7 @@ export class KokoroEngine extends EventEmitter {
     }
     switch (msg.type) {
       case 'ready':
+        this.retried = false
         this.setStatus('ready')
         break
       case 'chunk':

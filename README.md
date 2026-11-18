@@ -1,23 +1,28 @@
 # Kokoro Reader
 
-**Free, private, AI text-to-speech for macOS.**
+**Free, private, AI text-to-speech for macOS and Windows.**
 
 Select text in any app, press a hotkey, and hear it read aloud in a natural-sounding voice while each
-word is highlighted as it is spoken. Kokoro Reader is a menu-bar app built on the open-weight
-[Kokoro TTS](https://github.com/hexgrad/kokoro) model, run locally on Apple Silicon via
-[mlx-audio](https://github.com/Blaizzy/mlx-audio).
+word is highlighted as it is spoken. Kokoro Reader runs from the menu bar on macOS and the system
+tray on Windows. It uses the open-weight [Kokoro TTS](https://github.com/hexgrad/kokoro) model,
+running locally through [mlx-audio](https://github.com/Blaizzy/mlx-audio) on Apple Silicon and through
+CPU PyTorch on Windows.
 
 <img width="459" height="838" alt="Screenshot 2026-10-07 at 10 41 10 AM" src="https://github.com/user-attachments/assets/54adb358-243f-4dc5-a994-de986f6efc3e" />
 
 - **Free** — open source (GPL-3.0), no subscription, no API keys, no usage limits.
-- **Private** — speech is generated entirely on your Mac. Your text is never sent to a server; the
-  only network access is the one-time download of the model and Python dependencies.
-- **AI voices** — Kokoro's neural voices, with adjustable voice, speed, and model precision.
+- **Private** — speech is generated on your computer. The app downloads Python dependencies, model
+  weights, and voices on first use. Cached voices work offline.
+- **AI voices** — choose a Kokoro voice and playback speed. macOS also offers model precision settings.
 
 ## Download
 
-Grab the latest `.dmg` from the [Releases page](https://github.com/markhicken/kokoro-reader/releases/latest)
-(Apple Silicon only), open it, and drag Kokoro Reader to Applications.
+Installers are listed on the [Releases page](https://github.com/markhicken/kokoro-reader/releases/latest).
+
+- **macOS (Apple Silicon)** — open the `.dmg` and drag Kokoro Reader to Applications.
+- **Windows 11 (x64)** — run the `x64-setup.exe` installer when available, then open Kokoro Reader
+  from Start. Look in the notification-area overflow if the tray icon is hidden. Local builds use
+  an unsigned installer unless Windows signing credentials are configured.
 
 The app is not notarized, so macOS may block the first launch. Right-click the app and choose **Open**,
 or run:
@@ -28,65 +33,74 @@ xattr -dr com.apple.quarantine "/Applications/Kokoro Reader.app"
 
 To build from source instead, see below.
 
-## Requirements
+## Build from source
 
-Building from source needs:
+Both platforms require Node.js 22.12 or later and [uv](https://docs.astral.sh/uv/). `uv` installs
+Python and the platform's locked dependencies. Initial setup and the first use of a voice need internet access.
 
-- **Apple Silicon Mac** — MLX only runs on Apple Silicon; the build is arm64-only.
-- **Node.js** 20.19+ or 22.12+ (required by Vite 7 / electron-vite 5).
-- **[uv](https://docs.astral.sh/uv/)** — `npm install` runs `uv sync`, and `npm run dist` bundles the
-  local `uv` binary into the app. uv fetches a suitable Python (3.11–3.12) itself.
-- **Xcode Command Line Tools** (`xcode-select --install`) — `swiftc` builds the native helper.
-- **Network on first run** — Python dependencies and the model (~330 MB) are downloaded once.
-- *Optional:* `misaki[ja]` / `misaki[zh]` for Japanese / Chinese voices (see Architecture).
+- **macOS** — Apple Silicon and Xcode Command Line Tools (`xcode-select --install`).
+- **Windows** — Windows 11 x64 and Visual Studio 2022 Build Tools with **Desktop development with C++**
+  and a Windows SDK. The build locates the compiler from an ordinary PowerShell or Command Prompt.
 
-## Setup
-
-```sh
-npm install        # postinstall downloads the Electron binary and runs `uv sync` in python/
-npm run dev        # or: npm start (production build)
+```text
+npm ci
+npm run dev
+npm run dist -- --publish never
 ```
 
-### Build the Mac app
+The installer goes in `dist/`. macOS produces `Kokoro Reader-<version>-arm64.dmg` and Windows produces
+`Kokoro Reader-<version>-x64-setup.exe`.
 
-```sh
-npm run dist       # → dist/Kokoro Reader-<version>-arm64.dmg (and dist/mac-arm64/Kokoro Reader.app)
-```
-
-The app bundles `uv` and the Python sources. On first launch it creates its Python environment in
-`~/Library/Application Support/Kokoro Reader/python-env` (needs network; can take a few minutes on a
-fresh machine). The build is ad-hoc signed, not notarized: on another Mac, right-click → Open the
-first time. Rebuilding changes the signature, so macOS may ask for Accessibility permission again.
-
-The first run downloads the model from Hugging Face (~330 MB for bf16).
+The packaged app includes `uv` and the Python sources. On first launch it creates a Python environment
+in its per-user application data directory. The setup can take a few minutes. macOS stores it under
+`~/Library/Application Support/Kokoro Reader/` and Windows under `%APPDATA%\Kokoro Reader\`.
+The model comes from Hugging Face. Rebuilding the Mac app can require a new Accessibility grant.
 
 ## Usage
 
-- **Option+Shift+Space** (configurable) reads the current selection from any app. The first time, grant
-  Accessibility permission to Kokoro Reader (or Electron when running via `npm run dev`) (System Settings → Privacy & Security → Accessibility) —
-  the native helper (`native/helper.swift`) uses it to read the selection and locate words on screen.
+- **Option+Shift+Space** on macOS or **Ctrl+Alt+Space** on Windows reads the current selection. Change
+  the shortcut in Settings. On macOS, grant Accessibility permission to Kokoro Reader (or Electron
+  in development) in System Settings → Privacy & Security → Accessibility.
 - The tray menu offers Read Selection, Stop, and Settings. Pressing the hotkey while reading also stops.
-- The spoken word is highlighted in place in the source app (native text views and Safari/WebKit),
-  and optionally in the floating reader panel — both toggle in Settings.
-- The app never reads or writes the clipboard: selections are read via the Accessibility API, so apps
-  that don't expose their selection to Accessibility can't be read.
+- Enable source and reader panel highlighting independently in Settings. Source highlighting works
+  where macOS Accessibility or Windows UI Automation can report the position of the selected words.
+- Selection capture uses the OS accessibility API without accessing the clipboard. Source apps need to
+  expose their selection through those APIs. Windows apps running elevated may be unavailable to the reader.
 - Reader panel: Space = pause/resume, Esc = stop. Drag the header to move it; position is remembered.
-- Settings: voice, speed, model precision (bf16 / 8-bit / 6-bit / 4-bit — smaller is lighter on
-  memory), hotkey, and panel/highlight options.
+- Settings include voice, speed, shortcut, and panel and highlight options. macOS also offers
+  fp32, bf16, 8-bit, 6-bit, and 4-bit model precision. Windows uses a single CPU model.
 
 ## Architecture
 
-- `src/main` — Electron main process: tray, global hotkey, selection capture, settings
-  (`~/Library/Application Support/Kokoro Reader/settings.json`), sidecar management.
-- `python/kokoro_server.py` — long-lived mlx-audio sidecar speaking line-delimited JSON over stdio;
-  streams per-segment PCM plus per-word `start`/`end` timestamps.
+- `src/main` — Electron main process manages windows, tray, shortcuts, settings, and child processes.
+- `native/helper.swift` and `native/helper-windows.cpp` — macOS Accessibility and Windows UI Automation helpers.
+- `python/kokoro_server.py` and `python/kokoro_windows.py` — MLX and CPU PyTorch backends share a
+  line-delimited JSON protocol and stream PCM with word timings. Each OS has its own Python lockfile.
 - `src/renderer/reader` — floating panel: gapless Web Audio playback and word highlighting via the
   CSS Custom Highlight API.
 
 Word timestamps come from Kokoro's duration predictor for English voices (`a*`/`b*`). Other
 languages fall back to estimated timing. Spanish, French, Hindi, Italian and Portuguese use espeak-ng,
-which ships with the Python environment (no system install); their text isn't chunked yet, so very long
-selections may be cut short. Japanese and Chinese need extra G2P dependencies (`misaki[ja]`, `misaki[zh]`).
+which is installed in the Python environment. On macOS, Japanese and Chinese require optional
+G2P dependencies (`misaki[ja]`, `misaki[zh]`).
+
+## Validate before release
+
+The **Validate desktop builds** workflow builds both installers without publishing and runs a packaged
+speech test covering timestamps, cancellation, and cached offline speech. Require its **macOS arm64**
+and **Windows x64** checks before merging platform changes.
+
+- **Apple Silicon Mac** — install the test DMG over the previous build and verify settings persist.
+  Exercise first launch, grant and regrant Accessibility, then test the shortcut and tray action in
+  TextEdit and Safari. Verify word highlights, switching apps, full-screen sources, pause and resume,
+  stopping with the shortcut, and the floating panel with highlighting disabled or enabled.
+- **Windows 11 x64** — install under a standard account. Verify first setup, offline relaunch, upgrade,
+  and uninstall. Test the tray and shortcut in Notepad, a Chromium browser, and VS Code. Exercise
+  focus changes, apps without selection support, and monitors using different scaling.
+
+Mac releases continue to publish on pushes to `main` or `master`. After the interactive checks pass,
+set the repository Actions variable `RELEASE_WINDOWS` to `true` to include the Windows installer in
+the same releases. With Windows enabled, publication requires both installers to build successfully.
 
 ## Troubleshooting
 

@@ -50,6 +50,16 @@ body {
   -webkit-app-region: no-drag;
 }
 
+body.windows {
+  background: Canvas;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.windows .titlebar {
+  -webkit-app-region: no-drag;
+  padding-top: 18px;
+}
+
 .brand {
   display: flex;
   align-items: center;

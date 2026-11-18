@@ -34,6 +34,7 @@ export interface Chunk {
 export type EngineStatus = 'stopped' | 'loading' | 'ready' | 'error'
 
 export interface KokoroApi {
+  windows: boolean
   getSettings(): Promise<Settings>
   setSettings(patch: Partial<Settings>): Promise<Settings>
   preview(): void

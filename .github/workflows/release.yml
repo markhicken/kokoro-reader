@@ -5,40 +5,83 @@ on:
     branches: [main, master]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    runs-on: macos-latest # arm64
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-
-      - uses: astral-sh/setup-uv@v5
-
       - name: Compute version
         id: version
         run: |
           base=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
           echo "version=${base}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
+  macos:
+    needs: version
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v5
       - run: npm ci
-
-      - name: Set package version
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
-
-      # gh publishes the release; stop electron-builder auto-publishing on CI
+      - run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
       - run: npm run dist -- --publish never
+      - run: node scripts/check-package.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
 
+  windows:
+    if: vars.RELEASE_WINDOWS == 'true'
+    needs: version
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v5
+      - run: npm ci
+      - run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
+      - run: npm run dist -- --publish never
+      - run: node scripts/check-package.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-installer
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+  release:
+    needs: [version, macos, windows]
+    if: ${{ !cancelled() && needs.macos.result == 'success' && (vars.RELEASE_WINDOWS != 'true' || needs.windows.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          gh release create "v${{ steps.version.outputs.version }}" dist/*.dmg \
-            --title "v${{ steps.version.outputs.version }}" \
+          gh release create "v$VERSION" release/* \
+            --title "v$VERSION" \
             --generate-notes \
             --target "$GITHUB_SHA"

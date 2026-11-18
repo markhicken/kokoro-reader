@@ -8,6 +8,7 @@ const on =
   }
 
 const api: KokoroApi = {
+  windows: process.platform === 'win32',
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   getStatus: () => ipcRenderer.invoke('status:get'),

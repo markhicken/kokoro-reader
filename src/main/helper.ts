@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import type { Rectangle } from 'electron'
 
 export interface Capture {
   text: string
@@ -7,40 +8,58 @@ export interface Capture {
   sourceHighlight: boolean
 }
 
-/**
- * Manages the native kokoro-helper (native/helper.swift): reads the selection via
- * the Accessibility API and draws the in-place word highlight. Never uses the clipboard.
- */
+type CaptureReply = { type: 'capture' } & (
+  | ({ ok: true } & Capture)
+  | { ok: false; error: string; app?: string; detail?: string }
+)
+type HelperReply = CaptureReply | { type: 'rect'; request: number; bounds: Rectangle | null } | { type: 'hide' }
+
+/** Manages the native selection helper and its source highlighting commands. */
 export class AccessibilityHelper {
   private proc: ChildProcessWithoutNullStreams | null = null
-  private pending: ((msg: any) => void) | null = null
+  private pending: ((msg: CaptureReply) => void) | null = null
+  private nextRequest = 0
+  private inFlight: number | null = null
+  private nextWord: { from: number; to: number } | null = null
 
-  constructor(private path: string) {}
+  constructor(private path: string, private showWindowsHighlight?: (bounds: Rectangle | null) => void) {}
 
   start(): void {
     if (this.proc) return
-    const proc = spawn(this.path, [])
+    const proc = spawn(this.path, this.showWindowsHighlight ? [String(process.pid)] : [], { windowsHide: true })
     this.proc = proc
     createInterface({ input: proc.stdout }).on('line', (line) => {
-      let msg: any
+      if (this.proc !== proc) return
+      let msg: HelperReply
       try {
         msg = JSON.parse(line)
       } catch {
         return
       }
       if (msg.type === 'capture') {
-        this.pending?.(msg)
+        const pending = this.pending
         this.pending = null
+        pending?.(msg)
+      } else if (msg.type === 'hide') {
+        this.showWindowsHighlight?.(null)
+      } else if (msg.type === 'rect' && msg.request === this.inFlight) {
+        this.inFlight = null
+        this.showWindowsHighlight?.(msg.bounds)
+        const word = this.nextWord
+        this.nextWord = null
+        if (word) this.highlight(word.from, word.to, '')
       }
     })
     // A write to a dead helper emits EPIPE here; without a listener it is an uncaught exception.
     proc.stdin.on('error', (e) => console.error(`[helper] stdin error: ${e.message}`))
     proc.on('error', (e) => console.error(`[helper] spawn error: ${e.message}`))
     proc.stderr.on('data', (d) => console.log(`[helper] ${String(d).trimEnd()}`))
-    proc.on('exit', (code) => {
+    proc.on('close', (code) => {
+      if (this.proc !== proc) return
       console.error(`[helper] exited (code ${code})`)
       this.proc = null
-      this.pending?.({ ok: false, error: 'crashed' })
+      this.clear()
+      this.pending?.({ type: 'capture', ok: false, error: 'crashed' })
       this.pending = null
     })
   }
@@ -48,39 +67,56 @@ export class AccessibilityHelper {
   stop(): void {
     this.proc?.kill()
     this.proc = null
+    this.clear()
   }
 
-  capture(): Promise<Capture> {
+  capture(fromTray = false): Promise<Capture> {
     this.start()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending = null
+        this.stop()
         reject(new Error('Timed out reading the selection.'))
       }, 5000)
       this.pending = (msg) => {
         clearTimeout(timer)
         if (msg.ok) resolve({ text: msg.text, sourceHighlight: msg.sourceHighlight })
         else {
-          let message = CAPTURE_ERRORS[msg.error] ?? `Could not read the selection (${msg.error}).`
+          let message = msg.error === 'noselection' && this.showWindowsHighlight
+            ? 'Couldn’t read a selection. Select text in an app that exposes it to Windows UI Automation.'
+            : CAPTURE_ERRORS[msg.error] ?? `Could not read the selection (${msg.error}).`
           if (msg.error === 'noselection' && msg.app) message += ` (${msg.app}: ${msg.detail})`
           reject(Object.assign(new Error(message), { code: msg.error }))
         }
       }
-      this.send({ cmd: 'capture' })
+      this.send(this.showWindowsHighlight ? (fromTray ? 'capture tray' : 'capture') : { cmd: 'capture' })
     })
   }
 
   highlight(from: number, to: number, text: string): void {
-    this.send({ cmd: 'highlight', from, to, text })
+    if (this.showWindowsHighlight) {
+      if (!this.proc) return
+      if (this.inFlight !== null) {
+        this.nextWord = { from, to }
+        return
+      }
+      this.inFlight = ++this.nextRequest
+      this.send(`highlight ${this.inFlight} ${from} ${to}`)
+    } else {
+      this.send({ cmd: 'highlight', from, to, text })
+    }
   }
 
   clear(): void {
-    this.send({ cmd: 'clear' })
+    this.inFlight = null
+    this.nextWord = null
+    this.showWindowsHighlight?.(null)
+    this.send(this.showWindowsHighlight ? 'clear' : { cmd: 'clear' })
   }
 
-  private send(msg: object): void {
+  private send(msg: object | string): void {
     const stdin = this.proc?.stdin
-    if (stdin?.writable) stdin.write(JSON.stringify(msg) + '\n')
+    if (stdin?.writable) stdin.write((typeof msg === 'string' ? msg : JSON.stringify(msg)) + '\n')
   }
 }
 

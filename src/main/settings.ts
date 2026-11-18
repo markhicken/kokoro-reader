@@ -3,12 +3,13 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Settings } from '../shared/types'
 
+const windows = process.platform === 'win32'
 const DEFAULTS: Settings = {
   voice: 'af_heart',
   speed: 1.0,
-  model: 'bf16',
+  model: windows ? 'fp32' : 'bf16',
   // Option+Esc is taken by macOS's built-in "Speak selection" shortcut.
-  hotkey: 'Alt+Shift+Space',
+  hotkey: windows ? 'Control+Alt+Space' : 'Alt+Shift+Space',
   autoClosePanel: true,
   showPanel: true,
   highlightInSource: true,
@@ -24,7 +25,11 @@ export function getSettings(): Settings {
   if (!current) {
     try {
       current = { ...DEFAULTS, ...JSON.parse(readFileSync(file(), 'utf8')) }
-      if (current!.hotkey === 'Alt+Escape') current!.hotkey = DEFAULTS.hotkey // old default, conflicts with macOS
+      if (!windows && current!.hotkey === 'Alt+Escape') current!.hotkey = DEFAULTS.hotkey // old default, conflicts with macOS
+      if (windows) {
+        current!.model = DEFAULTS.model
+        if (!/^[abefhip][fm]_/.test(current!.voice)) current!.voice = DEFAULTS.voice
+      }
     } catch {
       current = { ...DEFAULTS }
     }
@@ -34,6 +39,7 @@ export function getSettings(): Settings {
 
 export function updateSettings(patch: Partial<Settings>): Settings {
   current = { ...getSettings(), ...patch }
+  if (windows) current.model = DEFAULTS.model
   writeFileSync(file(), JSON.stringify(current, null, 2))
   return current
 }

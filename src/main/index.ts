@@ -8,8 +8,11 @@ import { KokoroEngine, type EngineOptions } from './engine'
 import { AccessibilityHelper } from './helper'
 import { isAccessibilityTrusted, openAccessibilitySettings, requestAccessibility, watchAccessibility } from './permissions'
 import { getSettings, updateSettings } from './settings'
+import { showWindowsHighlight } from './windows-highlight'
 
 const PREVIEW_TEXT = 'Hello! This is how I sound at the current speed.'
+const windows = process.platform === 'win32'
+const APP_ID = 'local.kokoro-gui.reader'
 
 let tray: Tray | null = null
 let readerWin: BrowserWindow | null = null
@@ -19,6 +22,7 @@ let helper: AccessibilityHelper
 let currentId: string | null = null
 /** Whether the current read can be highlighted in the source app. */
 let currentSourceHighlight = false
+let capturing = false
 let firstRun = false
 /** True from the moment a read is requested until the engine has finished generating its audio. */
 let generating = false
@@ -56,8 +60,7 @@ function createReaderWindow(): BrowserWindow {
     show: false,
     frame: false,
     transparent: true,
-    vibrancy: 'hud',
-    visualEffectState: 'active',
+    ...(!windows && { vibrancy: 'hud', visualEffectState: 'active' }),
     alwaysOnTop: true,
     skipTaskbar: true,
     hasShadow: true,
@@ -65,7 +68,7 @@ function createReaderWindow(): BrowserWindow {
     webPreferences: { ...webPreferences(), backgroundThrottling: false }
   })
   win.setAlwaysOnTop(true, 'floating')
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  if (!windows) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   const saveBounds = () => updateSettings({ panelBounds: win.getBounds() })
   win.on('moved', saveBounds)
   win.on('resized', saveBounds)
@@ -87,10 +90,9 @@ function openSettings(): void {
     fullscreenable: false,
     maximizable: false,
     title: 'Kokoro Reader Settings',
-    titleBarStyle: 'hiddenInset',
-    vibrancy: 'sidebar',
-    visualEffectState: 'active',
-    backgroundColor: '#00000000',
+    ...(!windows && {
+      titleBarStyle: 'hiddenInset', vibrancy: 'sidebar', visualEffectState: 'active', backgroundColor: '#00000000'
+    }),
     webPreferences: webPreferences()
   })
   settingsWin.on('closed', () => (settingsWin = null))
@@ -106,7 +108,7 @@ function openSettings(): void {
       /* window closed before load finished */
     }
   })
-  app.focus({ steal: true })
+  if (!windows) app.focus({ steal: true })
 }
 
 /**
@@ -141,24 +143,29 @@ const NEEDS_ACCESSIBILITY =
   'Kokoro Reader needs Accessibility permission to read your selection. ' +
   'Turn it on in the dialog (or System Settings → Privacy & Security → Accessibility), then press the hotkey again.'
 
-async function readSelection(): Promise<void> {
-  if (!isAccessibilityTrusted()) {
+async function readSelection(fromTray = false): Promise<void> {
+  if (capturing) return
+  if (!windows && !isAccessibilityTrusted()) {
     showMessage(NEEDS_ACCESSIBILITY)
     await requestAccessibility()
     return
   }
+  capturing = true
   try {
-    const { text, sourceHighlight } = await helper.capture()
+    if (windows && currentId) stopReading()
+    const { text, sourceHighlight } = await helper.capture(fromTray)
     readText(text, sourceHighlight)
   } catch (e) {
     console.error('[kokoro] read selection failed:', (e as Error).message)
-    if ((e as { code?: string }).code === 'untrusted') {
+    if (!windows && (e as { code?: string }).code === 'untrusted') {
       // macOS reports us as trusted but the grant is stale (e.g. after a rebuild): reset and re-prompt.
       showMessage(NEEDS_ACCESSIBILITY)
       await requestAccessibility(true)
       return
     }
     showMessage((e as Error).message)
+  } finally {
+    capturing = false
   }
 }
 
@@ -174,7 +181,8 @@ function safeSend(win: BrowserWindow | null | undefined, channel: string, ...arg
 
 function updateTrayTitle(): void {
   if (!tray) return
-  if (generating) tray.setTitle(SPINNER_FRAMES[spinnerFrame])
+  if (windows) tray.setToolTip(`Kokoro Reader · ${generating ? 'Generating audio…' : STATUS_LABEL[engine.getStatus()]}`)
+  else if (generating) tray.setTitle(SPINNER_FRAMES[spinnerFrame])
   else tray.setTitle(engine.getStatus() === 'ready' ? '' : '…')
 }
 
@@ -184,7 +192,7 @@ function setGenerating(value: boolean): void {
   generating = value
   clearInterval(spinnerTimer)
   spinnerTimer = undefined
-  if (value) {
+  if (value && !windows) {
     spinnerFrame = 0
     spinnerTimer = setInterval(() => {
       spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length
@@ -223,7 +231,7 @@ function showMessage(message: string): void {
 }
 
 function helperPath(): string {
-  const name = 'kokoro-helper'
+  const name = windows ? 'kokoro-helper.exe' : 'kokoro-helper'
   return app.isPackaged ? join(process.resourcesPath, 'bin', name) : join(app.getAppPath(), 'build', 'bin', name)
 }
 
@@ -261,13 +269,15 @@ function registerHotkey(hotkey: string): boolean {
 }
 
 function engineOptions(): EngineOptions {
-  if (!app.isPackaged) return { pythonDir: join(app.getAppPath(), 'python') }
-  const envDir = join(app.getPath('userData'), 'python-env')
+  const dataDir = app.getPath('userData')
+  if (!app.isPackaged) return { pythonDir: join(app.getAppPath(), 'python'), dataDir }
+  const envDir = join(dataDir, 'python-env')
   firstRun = !existsSync(envDir)
   return {
     pythonDir: join(process.resourcesPath, 'python'),
-    uvPath: join(process.resourcesPath, 'bin', 'uv'),
-    envDir
+    uvPath: join(process.resourcesPath, 'bin', windows ? 'uv.exe' : 'uv'),
+    envDir,
+    dataDir
   }
 }
 
@@ -290,7 +300,7 @@ function rebuildMenu(): void {
         enabled: false
       },
       { type: 'separator' },
-      ...(isAccessibilityTrusted()
+      ...(windows || isAccessibilityTrusted()
         ? []
         : [
             {
@@ -302,7 +312,7 @@ function rebuildMenu(): void {
             },
             { type: 'separator' as const }
           ]),
-      { label: 'Read Selection', accelerator: hotkey, registerAccelerator: false, click: () => void readSelection() },
+      { label: 'Read Selection', accelerator: hotkey, registerAccelerator: false, click: () => void readSelection(true) },
       { label: 'Stop', enabled: currentId !== null, click: () => stopReading() },
       { type: 'separator' },
       { label: 'Settings…', click: openSettings },
@@ -312,10 +322,15 @@ function rebuildMenu(): void {
 }
 
 function createTray(): void {
-  const icon = nativeImage.createFromPath(join(__dirname, '../../resources/trayTemplate.png'))
-  icon.setTemplateImage(true)
+  const path = windows
+    ? (app.isPackaged ? join(process.resourcesPath, 'tray-windows.png') : join(app.getAppPath(), 'build', 'icon.png'))
+    : join(__dirname, '../../resources/trayTemplate.png')
+  const image = nativeImage.createFromPath(path)
+  if (!windows) image.setTemplateImage(true)
+  const icon = windows ? image.resize({ width: 32, height: 32 }) : image
   tray = new Tray(icon)
-  if (icon.isEmpty()) tray.setTitle('K')
+  if (windows) tray.on('click', () => tray?.popUpContextMenu())
+  else if (icon.isEmpty()) tray.setTitle('K')
   tray.setToolTip('Kokoro TTS')
   rebuildMenu()
 }
@@ -383,12 +398,17 @@ function wireEngine(): void {
   })
 }
 
-app.whenReady().then(() => {
+function start(): void {
   if (app.isPackaged) logToFile()
-  app.dock?.hide()
+  if (windows) {
+    Menu.setApplicationMenu(null)
+    app.setAppUserModelId(APP_ID)
+  } else {
+    app.dock?.hide()
+  }
   const settings = getSettings()
   engine = new KokoroEngine(engineOptions(), settings.model)
-  helper = new AccessibilityHelper(helperPath())
+  helper = new AccessibilityHelper(helperPath(), windows ? showWindowsHighlight : undefined)
   helper.start()
   wireEngine()
   wireIpc()
@@ -397,6 +417,7 @@ app.whenReady().then(() => {
   engine.start()
   readerWin = createReaderWindow()
 
+  if (windows) return
   watchAccessibility((trusted) => {
     console.log(`[kokoro] accessibility ${trusted ? 'granted' : 'revoked'}`)
     rebuildMenu()
@@ -406,13 +427,17 @@ app.whenReady().then(() => {
     }
   })
   if (!isAccessibilityTrusted()) void requestAccessibility()
-})
+}
 
-// Menu-bar app: keep running with no windows open.
-app.on('window-all-closed', () => {})
-
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll()
-  engine?.stop()
-  helper?.stop()
-})
+if (app.requestSingleInstanceLock()) {
+  void app.whenReady().then(start)
+  // Tray app: keep running with no windows open.
+  app.on('window-all-closed', () => {})
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll()
+    engine?.stop()
+    helper?.stop()
+  })
+} else {
+  app.quit()
+}

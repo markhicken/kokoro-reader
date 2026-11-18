@@ -134,28 +134,7 @@ def estimate_words(text: str, duration: float) -> list[dict]:
     return out
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="mlx-community/Kokoro-82M-bf16")
-    parser.add_argument(
-        "--dtype",
-        choices=["float32"],
-        help="Cast the loaded weights (no fp32 MLX Kokoro repo exists, so upcast bf16)",
-    )
-    args = parser.parse_args()
-
-    from mlx_audio.tts.utils import load_model
-
-    model = load_model(args.model)
-    if args.dtype == "float32":
-        import mlx.core as mx
-        from mlx.utils import tree_map
-
-        model.update(tree_map(lambda p: p.astype(mx.float32), model.parameters()))
-        mx.eval(model.parameters())
-    sr = model.sample_rate
-    # Warm up the default English pipeline so the first request is fast.
-    model._get_pipeline("a")
+def serve(get_pipeline, sr: int) -> None:
     send({"type": "ready", "sr": sr})
 
     jobs: queue.Queue = queue.Queue()
@@ -168,8 +147,9 @@ def main() -> None:
             try:
                 voice = req.get("voice", "af_heart")
                 lang = voice[0]
-                pipeline = model._get_pipeline(lang)
-                pipeline.voices = {}
+                if rid in cancelled:
+                    continue
+                pipeline = get_pipeline(lang)
                 text = normalize_text(
                     req["text"],
                     join_lines=req.get("joinLines", True),
@@ -239,6 +219,36 @@ def main() -> None:
 
     # stdin closed: finish queued work before exiting.
     jobs.join()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="mlx-community/Kokoro-82M-bf16")
+    parser.add_argument(
+        "--dtype",
+        choices=["float32"],
+        help="Cast the loaded weights (no fp32 MLX Kokoro repo exists, so upcast bf16)",
+    )
+    args = parser.parse_args()
+
+    from mlx_audio.tts.utils import load_model
+
+    model = load_model(args.model)
+    if args.dtype == "float32":
+        import mlx.core as mx
+        from mlx.utils import tree_map
+
+        model.update(tree_map(lambda p: p.astype(mx.float32), model.parameters()))
+        mx.eval(model.parameters())
+
+    def get_pipeline(lang):
+        pipeline = model._get_pipeline(lang)
+        pipeline.voices = {}
+        return pipeline
+
+    # Warm up the default English pipeline so the first request is fast.
+    model._get_pipeline("a")
+    serve(get_pipeline, model.sample_rate)
 
 
 if __name__ == "__main__":

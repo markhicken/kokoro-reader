@@ -66,7 +66,7 @@
           <div class="row">
             <div class="text">
               <label for="highlightInSource">Highlight words in the source app</label>
-              <span class="caption">Marks each word where you selected it. Works in most native apps and Safari.</span>
+              <span class="caption" id="sourceHighlightCaption">Marks each word where you selected it. Works in most native apps and Safari.</span>
             </div>
             <input id="highlightInSource" type="checkbox" class="switch" />
           </div>
@@ -90,14 +90,14 @@
           <div class="row">
             <div class="text">
               <label for="hotkey">Read selection</label>
-              <span class="caption">Press again while reading to stop.</span>
+              <span class="caption" id="hotkeyHint" aria-live="polite">Press again while reading to stop.</span>
             </div>
             <button type="button" id="hotkey" class="keycap" title="Click, then press a new shortcut"></button>
           </div>
         </div>
       </section>
 
-      <section>
+      <section id="engineOptions">
         <h2>Engine</h2>
         <div class="card">
           <div class="row">

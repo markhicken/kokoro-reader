@@ -1,6 +1,7 @@
 node_modules/
 out/
 python/.venv/
+python/windows/.venv/
 mcp-server.log
 dist/
 build/bin/
