@@ -1,3 +1,5 @@
+import '../overlay'
+
 const api = window.kokoro
 const toggle = document.getElementById('toggle')!
 
@@ -7,7 +9,7 @@ for (const command of ['rewind', 'toggle', 'forward', 'stop'] as const) {
 
 api.onPlaybackPaused((paused) => {
   const label = paused ? 'Play' : 'Pause'
-  toggle.textContent = paused ? '▶︎' : '⏸︎'
+  toggle.classList.toggle('paused', paused)
   toggle.title = label
   toggle.setAttribute('aria-label', label)
 })

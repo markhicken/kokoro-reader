@@ -3,17 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'" />
-    <title>Kokoro Reader — Preparing</title>
+    <title>Kokoro Reader — Status</title>
     <link rel="stylesheet" href="../overlay.css" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main class="overlay-surface" role="status">
-      <span class="spinner" aria-hidden="true"></span>
-      <div>
-        <p class="title">Preparing to read…</p>
-        <p class="hint" id="shortcutHint" hidden>Press <kbd id="shortcut"></kbd> to cancel</p>
-        <p class="hint" id="trayHint" hidden>Use Stop in the Kokoro Reader tray to cancel</p>
+      <div id="preparing" class="preparing" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <div>
+          <p class="title">Preparing to read…</p>
+          <p class="hint" id="shortcutHint" hidden>Press <kbd id="shortcut"></kbd> to cancel</p>
+          <p class="hint" id="trayHint" hidden>Use Stop in the Kokoro Reader tray to cancel</p>
+        </div>
+      </div>
+      <div id="noSelection" class="notice" hidden>
+        <p class="title">Nothing to read</p>
+        <p class="hint">Select some text and try again.</p>
       </div>
     </main>
     <script type="module" src="./main.ts"></script>

@@ -11,7 +11,7 @@ const DEFAULTS: Settings = {
   // Option+Esc is taken by macOS's built-in "Speak selection" shortcut.
   hotkey: windows ? 'Control+Alt+Space' : 'Alt+Shift+Space',
   autoClosePanel: true,
-  showPanel: true,
+  showPanel: false,
   showPreparingOverlay: true,
   showPlaybackControls: true,
   playbackControlsPosition: null,

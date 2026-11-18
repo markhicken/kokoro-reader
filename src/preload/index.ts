@@ -30,7 +30,7 @@ const api: KokoroApi = {
   onMessage: on('reader:message'),
   onError: on('reader:error'),
   onStatus: on('status'),
-  onPreparationShortcut: on('preparing:shortcut'),
+  onCenteredOverlay: on('centered-overlay:show'),
   onPlaybackPaused: on('playback-controls:paused'),
   onPlaybackCommand: on('reader:command')
 }

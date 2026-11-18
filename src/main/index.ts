@@ -1,24 +1,25 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, Tray, type BrowserWindowConstructorOptions, type NativeImage, type Rectangle } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync } from 'node:fs'
-import { release } from 'node:os'
 import { format } from 'node:util'
 import { join } from 'node:path'
-import type { EngineStatus, PlaybackCommand, Settings } from '../shared/types'
+import type { CenteredOverlay, EngineStatus, PlaybackCommand, Settings } from '../shared/types'
 import { KokoroEngine, type EngineOptions } from './engine'
 import { AccessibilityHelper } from './helper'
 import { isAccessibilityTrusted, openAccessibilitySettings, requestAccessibility, watchAccessibility } from './permissions'
 import { getSettings, updateSettings } from './settings'
 import { createMacSpinnerFrames, createWindowsSpinnerFrames } from './tray-spinner'
 import { showWindowsHighlight } from './windows-highlight'
+import { attachWindowsOverlayBackdrop } from './windows-overlay-backdrop'
 
 const PREVIEW_TEXT = 'Hello! This is how I sound at the current speed.'
+const TRAY_READ_DELAY_MS = 1000
 const PREPARING_DELAY_MS = 300
+const NO_SELECTION_NOTICE_MS = 3000
 const SPINNER_FRAME_COUNT = 10
 const WINDOW_MARGIN = 24
 const PLAYBACK_CONTROLS_SIZE = { width: 216, height: 54 }
 const windows = process.platform === 'win32'
-const windowsAcrylic = windows && Number(release().split('.')[2]) >= 22621 // Windows 11 22H2
 const APP_ID = 'local.kokoro-gui.reader'
 
 let tray: Tray | null = null
@@ -26,11 +27,11 @@ let trayIcon: NativeImage
 let traySpinnerFrames: NativeImage[] = []
 let readerWin: BrowserWindow | null = null
 let settingsWin: BrowserWindow | null = null
-let preparingWin: BrowserWindow | null = null
+let centeredWin: BrowserWindow | null = null
 let playbackWin: BrowserWindow | null = null
 let playbackReady = false
 let playbackPaused = false
-let preparingTimer: ReturnType<typeof setTimeout> | undefined
+let centeredRequest: { kind: CenteredOverlay['kind']; timer?: ReturnType<typeof setTimeout> } | undefined
 let engine: KokoroEngine
 let helper: AccessibilityHelper
 let currentId: string | null = null
@@ -38,6 +39,7 @@ let speech: { generationId: string; text: string; voice: string; joinLines: bool
 /** Whether the current read can be highlighted in the source app. */
 let currentSourceHighlight = false
 let capturing = false
+let trayReadTimer: ReturnType<typeof setTimeout> | undefined
 let firstRun = false
 type ReadStatus = 'idle' | 'preparing' | 'reading' | 'failed'
 let readStatus: ReadStatus = 'idle'
@@ -61,6 +63,7 @@ const webPreferences = () => ({
 const overlayOptions: BrowserWindowConstructorOptions = {
   show: false,
   frame: false,
+  // Windows acrylic paints behind the renderer's transparent corners.
   transparent: true,
   alwaysOnTop: true,
   skipTaskbar: true,
@@ -68,8 +71,8 @@ const overlayOptions: BrowserWindowConstructorOptions = {
 }
 
 function configureOverlay(win: BrowserWindow): void {
-  if (windowsAcrylic) win.setBackgroundMaterial('acrylic')
-  if (!windows) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  if (windows) attachWindowsOverlayBackdrop(win)
+  else win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 }
 
 function defaultReaderBounds(): Rectangle {
@@ -99,7 +102,7 @@ function createReaderWindow(): BrowserWindow {
     ...(panelBounds ?? defaultReaderBounds()),
     minWidth: 260,
     minHeight: 120,
-    hasShadow: true,
+    hasShadow: !windows,
     // The panel also drives playback/highlight timing while hidden.
     webPreferences: { ...webPreferences(), backgroundThrottling: false }
   })
@@ -229,7 +232,7 @@ function updatePlaybackControls(): void {
   }
 }
 
-function createPreparingWindow(): BrowserWindow {
+function createCenteredWindow(): BrowserWindow {
   const win = new BrowserWindow({
     ...overlayOptions,
     resizable: false,
@@ -239,45 +242,67 @@ function createPreparingWindow(): BrowserWindow {
   })
   configureOverlay(win)
   win.setIgnoreMouseEvents(true)
-  win.on('closed', () => { preparingWin = null })
+  win.on('closed', () => {
+    centeredWin = null
+    hideCenteredOverlay()
+  })
   loadRenderer(win, 'preparing')
   return win
 }
 
 function updatePreparationShortcut(win: BrowserWindow): void {
+  if (centeredRequest?.kind !== 'preparing') return
   const { hotkey } = getSettings()
-  safeSend(win, 'preparing:shortcut', globalShortcut.isRegistered(hotkey) ? hotkey : null)
+  const overlay: CenteredOverlay = { kind: 'preparing', hotkey: globalShortcut.isRegistered(hotkey) ? hotkey : null }
+  safeSend(win, 'centered-overlay:show', overlay)
 }
 
-function updatePreparingOverlay(): void {
-  clearTimeout(preparingTimer)
-  preparingTimer = undefined
-  if (readStatus !== 'preparing' || !getSettings().showPreparingOverlay) {
-    preparingWin?.hide()
-    return
-  }
+function hideCenteredOverlay(): void {
+  clearTimeout(centeredRequest?.timer)
+  centeredRequest = undefined
+  centeredWin?.hide()
+}
 
+function showCenteredOverlay(kind: CenteredOverlay['kind']): void {
+  hideCenteredOverlay()
+  const request: NonNullable<typeof centeredRequest> = { kind }
+  centeredRequest = request
   const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   const width = Math.min(360, workArea.width)
   const height = Math.min(112, workArea.height)
-  const timer = setTimeout(() => {
-    preparingWin ??= createPreparingWindow()
-    const win = preparingWin
+  const open = () => {
+    const win = centeredWin ??= createCenteredWindow()
     const show = () => {
-      if (timer !== preparingTimer || win.isDestroyed()) return
+      if (centeredRequest !== request || win.isDestroyed()) return
       win.setBounds({
         x: workArea.x + Math.round((workArea.width - width) / 2),
         y: workArea.y + Math.round((workArea.height - height) / 2),
         width,
         height
       })
-      updatePreparationShortcut(win)
+      if (kind === 'preparing') updatePreparationShortcut(win)
+      else {
+        const overlay: CenteredOverlay = { kind: 'no-selection' }
+        safeSend(win, 'centered-overlay:show', overlay)
+        request.timer = setTimeout(hideCenteredOverlay, NO_SELECTION_NOTICE_MS)
+      }
       win.showInactive()
     }
     if (win.webContents.isLoading()) win.webContents.once('did-finish-load', show)
     else show()
-  }, PREPARING_DELAY_MS)
-  preparingTimer = timer
+  }
+  if (kind === 'preparing') request.timer = setTimeout(open, PREPARING_DELAY_MS)
+  else open()
+}
+
+function updatePreparingOverlay(): void {
+  if (readStatus === 'preparing' && getSettings().showPreparingOverlay) showCenteredOverlay('preparing')
+  else if (readStatus === 'preparing' || centeredRequest?.kind === 'preparing') hideCenteredOverlay()
+}
+
+function showNoSelectionNotice(): void {
+  stopReading(currentId !== null)
+  showCenteredOverlay('no-selection')
 }
 
 /**
@@ -286,7 +311,7 @@ function updatePreparingOverlay(): void {
  */
 function readText(text: string, sourceHighlight = false): void {
   if (!text.trim()) {
-    showMessage('Nothing to read — select some text first.')
+    showNoSelectionNotice()
     return
   }
   stopReading(false)
@@ -316,7 +341,20 @@ const NEEDS_ACCESSIBILITY =
   'Kokoro Reader needs Accessibility permission to read your selection. ' +
   'Turn it on in the dialog (or System Settings → Privacy & Security → Accessibility), then press the hotkey again.'
 
+function cancelTrayRead(): void {
+  clearTimeout(trayReadTimer)
+  trayReadTimer = undefined
+}
+
+function scheduleTrayRead(): void {
+  if (capturing) return
+  cancelTrayRead()
+  // Give focus a chance to return to the source app after the tray menu closes.
+  trayReadTimer = setTimeout(() => void readSelection(true), TRAY_READ_DELAY_MS)
+}
+
 async function readSelection(fromTray = false): Promise<void> {
+  cancelTrayRead()
   if (capturing) return
   if (!windows && !isAccessibilityTrusted()) {
     showMessage(NEEDS_ACCESSIBILITY)
@@ -330,7 +368,12 @@ async function readSelection(fromTray = false): Promise<void> {
     readText(text, sourceHighlight)
   } catch (e) {
     console.error('[kokoro] read selection failed:', (e as Error).message)
-    if (!windows && (e as { code?: string }).code === 'untrusted') {
+    const { code } = e as { code?: string }
+    if (code === 'noselection') {
+      showNoSelectionNotice()
+      return
+    }
+    if (!windows && code === 'untrusted') {
       // macOS reports us as trusted but the grant is stale (e.g. after a rebuild): reset and re-prompt.
       showMessage(NEEDS_ACCESSIBILITY)
       await requestAccessibility(true)
@@ -385,6 +428,7 @@ function clearRead(status: 'idle' | 'failed' = 'idle'): void {
 }
 
 function stopReading(hide = true): void {
+  cancelTrayRead()
   if (speech) engine.cancel(speech.generationId)
   clearRead()
   if (hide) {
@@ -397,6 +441,7 @@ function stopReading(hide = true): void {
 /** Show a status/error message in the reader panel (notifications may be disabled). */
 function showMessage(message: string): void {
   stopReading(false)
+  hideCenteredOverlay()
   if (!readerWin) readerWin = createReaderWindow()
   const win = readerWin
   const send = () => safeSend(win, 'reader:message', message)
@@ -495,7 +540,7 @@ function rebuildMenu(): void {
             },
             { type: 'separator' as const }
           ]),
-      { label: 'Read Selection', accelerator: hotkey, registerAccelerator: false, click: () => void readSelection(true) },
+      { label: 'Read Selection', accelerator: hotkey, registerAccelerator: false, click: scheduleTrayRead },
       { label: 'Stop', enabled: currentId !== null, click: () => stopReading() },
       { type: 'separator' },
       { label: 'Settings…', click: openSettings },
@@ -544,7 +589,7 @@ function wireIpc(): void {
       positionDefaultReader()
       updatePlaybackControls()
     }
-    if (preparingWin?.isVisible()) updatePreparationShortcut(preparingWin)
+    if (centeredWin?.isVisible()) updatePreparationShortcut(centeredWin)
     if (patch.highlightInSource === false) {
       currentSourceHighlight = false
       helper.clear()
@@ -557,7 +602,7 @@ function wireIpc(): void {
   ipcMain.on('hotkey:suspend', (_e, suspend: boolean) => {
     if (suspend) globalShortcut.unregisterAll()
     else registerHotkey(getSettings().hotkey)
-    if (preparingWin?.isVisible()) updatePreparationShortcut(preparingWin)
+    if (centeredWin?.isVisible()) updatePreparationShortcut(centeredWin)
   })
   ipcMain.on('stop', () => stopReading())
   ipcMain.on('reader:playback-started', (_e, id: string) => {
@@ -664,8 +709,9 @@ if (app.requestSingleInstanceLock()) {
   // Tray app: keep running with no windows open.
   app.on('window-all-closed', () => {})
   app.on('will-quit', () => {
+    cancelTrayRead()
     clearInterval(spinnerTimer)
-    clearTimeout(preparingTimer)
+    clearTimeout(centeredRequest?.timer)
     globalShortcut.unregisterAll()
     engine?.stop()
     helper?.stop()

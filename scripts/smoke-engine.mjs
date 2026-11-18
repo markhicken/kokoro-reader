@@ -138,10 +138,22 @@ try {
       assert.equal(regenerated.speed, 1.25)
     }
     assert.deepEqual(await next(), { type: 'done', id: 'regenerate' })
+    const plainText = 'The café charges $12 for coffee.'
+    send({ cmd: 'speak', id: 'plain', text: plainText, voice: 'af_heart' })
+    const plain = await next()
+    checkChunk(plain, 'plain', 0)
+    assert.deepEqual(await next(), { type: 'done', id: 'plain' })
+    send({ cmd: 'speak', id: 'decorated', text: '▪ • The café■charges $12 for coffee. · ☑️', voice: 'af_heart' })
+    const decorated = await next()
+    checkChunk(decorated, 'decorated', 0)
+    assert.deepEqual(decorated.words.map((word) => word.text), plain.words.map((word) => word.text))
+    assert.deepEqual(await next(), { type: 'done', id: 'decorated' })
+    send({ cmd: 'speak', id: 'symbols-only', text: '• ■ · ☑️', voice: 'af_heart' })
+    assert.deepEqual(await next(), { type: 'done', id: 'symbols-only' })
     if (windows) await readAll(send, next, 'spanish', '¿Cómo estás? La música empieza a las nueve.', 'ef_dora')
   })
   await runEngine(true, (send, next) => readAll(send, next, 'offline', english, 'af_heart'))
-  console.log('Verified timed speech, streaming, cancellation, live speed changes, chunk regeneration, and offline relaunch.')
+  console.log('Verified timed speech, streaming, cancellation, live speed changes, chunk regeneration, symbol filtering, and offline relaunch.')
 } finally {
   if (dirname(realpathSync(temp)) === scratch) rmSync(temp, { recursive: true, force: true })
 }

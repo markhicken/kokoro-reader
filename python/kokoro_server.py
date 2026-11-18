@@ -48,6 +48,15 @@ _ABBREVS = {
     r"approx\.": "approximately",
 }
 
+_DECORATIVE_MARKS = re.compile(
+    r"(?:"
+    r"[\u2022\u2023\u2043\u204c\u204d\u2219\uf0a7\uf0b7]"  # bullets
+    r"|[\u25a0-\u25ff\u274f-\u2752\u2756\u2b1b\u2b1c\U0001f536-\U0001f539\U0001f780-\U0001f7eb]"  # shapes
+    r"|[\u2605\u2606\u2610-\u2612\u2705\u2713\u2714\u2726\u2727\u274c\u2b50]"  # stars and checkboxes
+    r"|(?<!\w)\u00b7|\u00b7(?!\w)"  # keep the middle dot inside words such as l·l
+    r")[\ufe0e\ufe0f]*"
+)
+
 
 def normalize_text(text: str, join_lines: bool = True, expand_words: bool = True) -> str:
     """Clean text the G2P handles poorly. Newlines are kept: they are the chunk splits."""
@@ -60,6 +69,7 @@ def normalize_text(text: str, join_lines: bool = True, expand_words: bool = True
     # Markdown / URLs
     text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"https?://\S+|www\.\S+", "link", text)
+    text = _DECORATIVE_MARKS.sub(" ", text)  # keep adjacent words separate
     text = re.sub(r"(?m)^\s{0,3}(#{1,6}|>|[-*+])\s+", "", text)
     text = re.sub(r"[`*_~]{1,3}(?=\S)([^`*_~\n]*?)(?<=\S)[`*_~]{1,3}", r"\1", text)
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)  # hyphenated line wrap

@@ -9,3 +9,13 @@
   border-radius: 12px;
   background: #171a22d1;
 }
+
+.windows .overlay-surface {
+  --surface-tint: #171a22;
+  border-color: transparent;
+  /* Cover the inset backdrop's rectangular edges and fade into the tinted center. */
+  background:
+    linear-gradient(90deg, var(--surface-tint) 10px, transparent 16px, transparent calc(100% - 16px), var(--surface-tint) calc(100% - 10px)),
+    linear-gradient(var(--surface-tint) 10px, transparent 16px, transparent calc(100% - 16px), var(--surface-tint) calc(100% - 10px)),
+    #171a22d9;
+}

@@ -1,5 +1,6 @@
 import { Highlighter } from './highlight'
 import { Player } from './player'
+import '../overlay'
 
 const api = window.kokoro
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T

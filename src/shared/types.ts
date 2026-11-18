@@ -40,6 +40,7 @@ export type ReaderChunk = Chunk & { generationId: string }
 
 export type EngineStatus = 'stopped' | 'loading' | 'ready' | 'error'
 export type PlaybackCommand = 'rewind' | 'toggle' | 'forward' | 'stop'
+export type CenteredOverlay = { kind: 'preparing'; hotkey: string | null } | { kind: 'no-selection' }
 
 export interface KokoroApi {
   windows: boolean
@@ -63,7 +64,7 @@ export interface KokoroApi {
   onMessage(cb: (message: string) => void): void
   onError(cb: (message: string) => void): void
   onStatus(cb: (status: EngineStatus) => void): void
-  onPreparationShortcut(cb: (hotkey: string | null) => void): void
+  onCenteredOverlay(cb: (overlay: CenteredOverlay) => void): void
   onPlaybackPaused(cb: (paused: boolean) => void): void
   onPlaybackCommand(cb: (id: string, command: Exclude<PlaybackCommand, 'stop'>) => void): void
   getStatus(): Promise<EngineStatus>

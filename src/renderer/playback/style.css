@@ -48,6 +48,20 @@ button:hover, button:focus-visible {
   background: #ffffff14;
 }
 
+.primary::before {
+  content: '';
+  box-sizing: border-box;
+  width: 12px;
+  height: 14px;
+  border-inline: 4px solid currentColor;
+}
+
+.primary.paused::before {
+  border: solid transparent;
+  border-width: 7px 0 7px 12px;
+  border-left-color: currentColor;
+}
+
 .skip {
   font-size: 19px;
   line-height: 15px;
