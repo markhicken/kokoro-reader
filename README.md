@@ -20,7 +20,7 @@ CPU PyTorch on Windows.
 Installers are listed on the [Releases page](https://github.com/markhicken/kokoro-reader/releases/latest).
 
 - **macOS (Apple Silicon)** — open the `.dmg` and drag Kokoro Reader to Applications.
-- **Windows 11 (x64)** — run the `x64-setup.exe` installer when available, then open Kokoro Reader
+- **Windows 11 (x64)** — run the `x64-setup.exe` installer, then open Kokoro Reader
   from Start. Look in the notification-area overflow if the tray icon is hidden. Local builds use
   an unsigned installer unless Windows signing credentials are configured.
 
@@ -100,9 +100,10 @@ and **Windows x64** checks before merging platform changes.
   and uninstall. Test the tray and shortcut in Notepad, a Chromium browser, and VS Code. Exercise
   focus changes, apps without selection support, and monitors using different scaling.
 
-Mac releases continue to publish on pushes to `main` or `master`. After the interactive checks pass,
-set the repository Actions variable `RELEASE_WINDOWS` to `true` to include the Windows installer in
-the same releases. With Windows enabled, publication requires both installers to build successfully.
+The **Release** workflow publishes on pushes to `main` or `master`, or when run manually. Every release
+requires both installers to build and pass package checks; no repository variable is needed to enable
+Windows. Verify the release includes both the macOS arm64 `.dmg` and Windows x64 `-setup.exe` for the
+same version, then complete the platform checks above.
 
 ## Troubleshooting
 

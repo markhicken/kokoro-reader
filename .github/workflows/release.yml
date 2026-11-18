@@ -45,7 +45,6 @@ jobs:
           if-no-files-found: error
 
   windows:
-    if: vars.RELEASE_WINDOWS == 'true'
     needs: version
     runs-on: windows-2025
     steps:
@@ -67,7 +66,6 @@ jobs:
 
   release:
     needs: [version, macos, windows]
-    if: ${{ !cancelled() && needs.macos.result == 'success' && (vars.RELEASE_WINDOWS != 'true' || needs.windows.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
