@@ -12,7 +12,8 @@ type CaptureReply = { type: 'capture' } & (
   | ({ ok: true } & Capture)
   | { ok: false; error: string; app?: string; detail?: string }
 )
-type HelperReply = CaptureReply | { type: 'rect'; request: number; bounds: Rectangle | null } | { type: 'hide' }
+type HelperReply = CaptureReply | { type: 'rect'; request: number; bounds: Rectangle | null } |
+  { type: 'hide' } | { type: 'status'; trusted: boolean }
 
 /** Manages the native selection helper and its source highlighting commands. */
 export class AccessibilityHelper {
@@ -21,6 +22,7 @@ export class AccessibilityHelper {
   private nextRequest = 0
   private inFlight: number | null = null
   private nextWord: { from: number; to: number } | null = null
+  private pendingStatus: ((trusted: boolean) => void)[] = []
 
   constructor(private path: string, private showWindowsHighlight?: (bounds: Rectangle | null) => void) {}
 
@@ -48,6 +50,8 @@ export class AccessibilityHelper {
         const word = this.nextWord
         this.nextWord = null
         if (word) this.highlight(word.from, word.to, '')
+      } else if (msg.type === 'status') {
+        this.pendingStatus.shift()?.(!!msg.trusted)
       }
     })
     // A write to a dead helper emits EPIPE here; without a listener it is an uncaught exception.
@@ -61,7 +65,17 @@ export class AccessibilityHelper {
       this.clear()
       this.pending?.({ type: 'capture', ok: false, error: 'crashed' })
       this.pending = null
+      for (const resolve of this.pendingStatus.splice(0)) resolve(true)
     })
+  }
+
+  /** Respawn so the helper picks up a freshly granted permission instead of its pre-grant state. */
+  restart(): void {
+    this.stop()
+    this.pending?.({ type: 'capture', ok: false, error: 'crashed' })
+    this.pending = null
+    for (const resolve of this.pendingStatus.splice(0)) resolve(true)
+    this.start()
   }
 
   stop(): void {
@@ -90,6 +104,23 @@ export class AccessibilityHelper {
         }
       }
       this.send(this.showWindowsHighlight ? (fromTray ? 'capture tray' : 'capture') : { cmd: 'capture' })
+    })
+  }
+
+  /** Whether the helper's Accessibility calls actually work (false for missing, revoked or stale grants). */
+  checkTrusted(): Promise<boolean> {
+    this.start()
+    return new Promise((resolve) => {
+      const done = (trusted: boolean) => {
+        clearTimeout(timer)
+        resolve(trusted)
+      }
+      const timer = setTimeout(() => {
+        this.pendingStatus = this.pendingStatus.filter((f) => f !== done)
+        resolve(true) // an unresponsive helper says nothing about the grant; don't raise a false alarm
+      }, 3000)
+      this.pendingStatus.push(done)
+      this.send({ cmd: 'status' })
     })
   }
 

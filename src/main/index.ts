@@ -6,7 +6,13 @@ import { join } from 'node:path'
 import type { CenteredOverlay, EngineStatus, PlaybackCommand, Settings } from '../shared/types'
 import { KokoroEngine, type EngineOptions } from './engine'
 import { AccessibilityHelper } from './helper'
-import { isAccessibilityTrusted, openAccessibilitySettings, requestAccessibility, watchAccessibility } from './permissions'
+import {
+  isAccessibilityTrusted,
+  openAccessibilitySettings,
+  requestAccessibility,
+  resetGrantForNewBuild,
+  watchAccessibility
+} from './permissions'
 import { getSettings, updateSettings } from './settings'
 import { createMacSpinnerFrames, createWindowsSpinnerFrames } from './tray-spinner'
 import { showWindowsHighlight } from './windows-highlight'
@@ -341,6 +347,22 @@ const NEEDS_ACCESSIBILITY =
   'Kokoro Reader needs Accessibility permission to read your selection. ' +
   'Turn it on in the dialog (or System Settings → Privacy & Security → Accessibility), then press the hotkey again.'
 
+/** Cached result of checkAccessibility(); drives the tray menu warning. */
+let accessibilityOk = true
+
+/** Trusted by macOS *and* actually usable by the helper (a stale grant reads as trusted). */
+async function checkAccessibility(): Promise<boolean> {
+  return isAccessibilityTrusted() && (await helper.checkTrusted())
+}
+
+/** Tell the user the grant is missing, revoked or stale, and ask for a new one. */
+async function warnAccessibilityMissing(): Promise<void> {
+  notify('Accessibility permission needed', NEEDS_ACCESSIBILITY)
+  showMessage(NEEDS_ACCESSIBILITY)
+  // macOS only reports a stale grant as trusted; reset it so the prompt appears again.
+  await requestAccessibility(isAccessibilityTrusted())
+}
+
 function cancelTrayRead(): void {
   clearTimeout(trayReadTimer)
   trayReadTimer = undefined
@@ -357,6 +379,8 @@ async function readSelection(fromTray = false): Promise<void> {
   cancelTrayRead()
   if (capturing) return
   if (!windows && !isAccessibilityTrusted()) {
+    accessibilityOk = false
+    rebuildMenu()
     showMessage(NEEDS_ACCESSIBILITY)
     await requestAccessibility()
     return
@@ -375,6 +399,8 @@ async function readSelection(fromTray = false): Promise<void> {
     }
     if (!windows && code === 'untrusted') {
       // macOS reports us as trusted but the grant is stale (e.g. after a rebuild): reset and re-prompt.
+      accessibilityOk = false
+      rebuildMenu()
       showMessage(NEEDS_ACCESSIBILITY)
       await requestAccessibility(true)
       return
@@ -528,7 +554,7 @@ function rebuildMenu(): void {
         enabled: false
       },
       { type: 'separator' },
-      ...(windows || isAccessibilityTrusted()
+      ...(windows || accessibilityOk
         ? []
         : [
             {
@@ -693,15 +719,24 @@ function start(): void {
   readerWin = createReaderWindow()
 
   if (windows) return
-  watchAccessibility((trusted) => {
-    console.log(`[kokoro] accessibility ${trusted ? 'granted' : 'revoked'}`)
+  void resetGrantForNewBuild(helperPath()).then(checkAccessibility).then((ok) => {
+    accessibilityOk = ok
     rebuildMenu()
-    if (trusted) {
-      notify('Accessibility enabled', `Press ${getSettings().hotkey} with text selected to read it aloud.`)
-      if (readerWin?.isVisible() && !currentId) readerWin.hide()
-    }
+    if (!ok) void warnAccessibilityMissing()
+    watchAccessibility(ok, checkAccessibility, (trusted) => {
+      console.log(`[kokoro] accessibility ${trusted ? 'granted' : 'revoked or invalid'}`)
+      const alreadyFlagged = !accessibilityOk // a failed capture may have flagged it and prompted already
+      accessibilityOk = trusted
+      rebuildMenu()
+      if (trusted) {
+        helper.restart()
+        notify('Accessibility enabled', `Press ${getSettings().hotkey} with text selected to read it aloud.`)
+        if (readerWin?.isVisible() && !currentId) readerWin.hide()
+      } else if (!alreadyFlagged) {
+        void warnAccessibilityMissing()
+      }
+    })
   })
-  if (!isAccessibilityTrusted()) void requestAccessibility()
 }
 
 if (app.requestSingleInstanceLock()) {

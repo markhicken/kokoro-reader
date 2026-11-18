@@ -8,9 +8,11 @@
 //                                             overlay the word at UTF-16 offsets [from, to)
 //                                             of the captured text, in the source app
 //   {"cmd":"clear"}                           hide the overlay
+//   {"cmd":"status"}                          report whether Accessibility calls actually work
 // Responses:
 //   {"type":"capture","ok":true,"text":"...","sourceHighlight":true}
 //   {"type":"capture","ok":false,"error":"untrusted"|"noselection","app":"bundle id","detail":"..."}
+//   {"type":"status","trusted":true}
 import AppKit
 import ApplicationServices
 
@@ -83,10 +85,25 @@ func restoreAccessibility() {
 }
 
 /// True if Accessibility calls are being refused for this process despite AXIsProcessTrusted().
+/// A stale grant answers .apiDisabled; some macOS versions answer .cannotComplete to both an app's
+/// role and the system-wide focus query instead (a healthy app always has a role).
 func axDisabled(_ app: AXUIElement) -> Bool {
     var value: CFTypeRef?
-    if AXUIElementCopyAttributeValue(app, kAXRoleAttribute as CFString, &value) == .apiDisabled { return true }
-    return AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &value) == .apiDisabled
+    let appErr = AXUIElementCopyAttributeValue(app, kAXRoleAttribute as CFString, &value)
+    let sysErr = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &value)
+    log("axDisabled probe: appRole=\(appErr.rawValue) systemFocus=\(sysErr.rawValue)")
+    if appErr == .apiDisabled || sysErr == .apiDisabled { return true }
+    return appErr == .cannotComplete && sysErr == .cannotComplete
+}
+
+/// True only if the grant is present and valid: a stale entry passes AXIsProcessTrusted()
+/// but every AX call fails with apiDisabled.
+func accessibilityUsable() -> Bool {
+    guard AXIsProcessTrusted() else { return false }
+    let systemWide = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(systemWide, 0.5)
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &value) != .apiDisabled
 }
 
 func focusedElement(in app: AXUIElement) -> AXUIElement? {
@@ -457,6 +474,8 @@ func handle(_ line: String) {
     case "clear":
         overlay.hide()
         restoreAccessibility()
+    case "status":
+        send(["type": "status", "trusted": accessibilityUsable()])
     default:
         break
     }
