@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'" />
+    <title>Kokoro Reader — Playback controls</title>
+    <link rel="stylesheet" href="../overlay.css" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="overlay-surface" aria-label="Playback controls">
+      <span class="handle" aria-hidden="true"></span>
+      <button type="button" class="skip" id="rewind" title="Back 10 seconds" aria-label="Back 10 seconds"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><g><path d="M12 5A8 8 0 1 1 4 13M14.5 1.8L11 5l3.5 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g><text x="12" y="16.3" text-anchor="middle" font-size="7.5" font-weight="700" fill="currentColor" font-family="system-ui, sans-serif">10</text></svg></button>
+      <button type="button" class="primary" id="toggle" title="Pause" aria-label="Pause"></button>
+      <button type="button" class="skip" id="forward" title="Forward 10 seconds" aria-label="Forward 10 seconds"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><g transform="translate(24 0) scale(-1 1)"><path d="M12 5A8 8 0 1 1 4 13M14.5 1.8L11 5l3.5 3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></g><text x="12" y="16.3" text-anchor="middle" font-size="7.5" font-weight="700" fill="currentColor" font-family="system-ui, sans-serif">10</text></svg></button>
+      <button type="button" id="stop" title="Stop" aria-label="Stop">■</button>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -4,9 +4,11 @@ Requests (stdin):
   {"id": "1", "cmd": "speak", "text": "...", "voice": "af_heart", "speed": 1.0,
    "joinLines": true, "expandWords": true}
   {"id": "1", "cmd": "cancel"}
+  {"id": "1", "cmd": "speed", "speed": 1.25}
+  A speak request can also set startSeq to begin at an existing text chunk boundary.
 Responses (stdout):
   {"type": "ready"}
-  {"type": "chunk", "id", "seq", "sr", "pcm": <base64 float32 LE>, "words": [{"text", "start", "end"}]}
+  {"type": "chunk", "id", "seq", "speed", "sr", "pcm": <base64 float32 LE>, "words": [{"text", "start", "end"}]}
   {"type": "done", "id"} | {"type": "error", "id", "message"}
 """
 
@@ -46,6 +48,15 @@ _ABBREVS = {
     r"approx\.": "approximately",
 }
 
+_DECORATIVE_MARKS = re.compile(
+    r"(?:"
+    r"[\u2022\u2023\u2043\u204c\u204d\u2219\uf0a7\uf0b7]"  # bullets
+    r"|[\u25a0-\u25ff\u274f-\u2752\u2756\u2b1b\u2b1c\U0001f536-\U0001f539\U0001f780-\U0001f7eb]"  # shapes
+    r"|[\u2605\u2606\u2610-\u2612\u2705\u2713\u2714\u2726\u2727\u274c\u2b50]"  # stars and checkboxes
+    r"|(?<!\w)\u00b7|\u00b7(?!\w)"  # keep the middle dot inside words such as l·l
+    r")[\ufe0e\ufe0f]*"
+)
+
 
 def normalize_text(text: str, join_lines: bool = True, expand_words: bool = True) -> str:
     """Clean text the G2P handles poorly. Newlines are kept: they are the chunk splits."""
@@ -58,6 +69,7 @@ def normalize_text(text: str, join_lines: bool = True, expand_words: bool = True
     # Markdown / URLs
     text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"https?://\S+|www\.\S+", "link", text)
+    text = _DECORATIVE_MARKS.sub(" ", text)  # keep adjacent words separate
     text = re.sub(r"(?m)^\s{0,3}(#{1,6}|>|[-*+])\s+", "", text)
     text = re.sub(r"[`*_~]{1,3}(?=\S)([^`*_~\n]*?)(?<=\S)[`*_~]{1,3}", r"\1", text)
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)  # hyphenated line wrap
@@ -134,6 +146,123 @@ def estimate_words(text: str, duration: float) -> list[dict]:
     return out
 
 
+def serve(get_pipeline, sr: int) -> None:
+    send({"type": "ready", "sr": sr})
+
+    jobs: queue.Queue = queue.Queue()
+    active: dict[str, dict] = {}
+    state_lock = threading.Lock()
+
+    def worker() -> None:
+        last_input = None
+        segments = []
+        while True:
+            req = jobs.get()
+            rid = req["id"]
+            try:
+                voice = req.get("voice", "af_heart")
+                lang = voice[0]
+                with state_lock:
+                    if req["cancelled"]:
+                        continue
+                pipeline = get_pipeline(lang)
+                join_lines = req.get("joinLines", True)
+                expand_words = req.get("expandWords", True)
+                source = (req["text"], lang, join_lines, expand_words)
+                if source != last_input:
+                    text = normalize_text(req["text"], join_lines, expand_words)
+
+                    def measure(t: str) -> int:
+                        if lang not in "ab":
+                            return len(t)
+                        _, toks = pipeline.g2p(t)
+                        return sum(len(k.phonemes or "") + bool(k.whitespace) for k in toks)
+
+                    segments = [c for line in re.split(r"\n+", text.strip()) for c in split_chunks(line, measure)]
+                    last_input = source
+
+                start_seq = max(0, int(req.get("startSeq", 0)))
+                for seq in range(start_seq, len(segments)):
+                    with state_lock:
+                        if req["cancelled"]:
+                            break
+                        speed = float(req.get("speed", 1.0))
+                    audio_parts = []
+                    words = []
+                    samples = 0
+                    # Keep one stable sequence number per text segment even if a backend splits it further.
+                    for result in pipeline(segments[seq], voice=voice, speed=speed):
+                        if result.audio is None:
+                            continue
+                        audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
+                        if result.tokens:
+                            timed = [
+                                {"text": t.text, "start": t.start_ts, "end": t.end_ts}
+                                for t in result.tokens
+                                if t.start_ts is not None and t.end_ts is not None
+                            ]
+                        else:
+                            timed = estimate_words(result.graphemes, len(audio) / sr)
+                        offset = samples / sr
+                        for word in timed:
+                            words.append({"text": word["text"], "start": offset + word["start"], "end": offset + word["end"]})
+                        samples += len(audio)
+                        audio_parts.append(audio.tobytes())
+                    with state_lock:
+                        if req["cancelled"]:
+                            break
+                    if not samples:
+                        continue
+                    send(
+                        {
+                            "type": "chunk",
+                            "id": rid,
+                            "seq": seq,
+                            "speed": speed,
+                            "sr": sr,
+                            "pcm": base64.b64encode(b"".join(audio_parts)).decode("ascii"),
+                            "words": words,
+                        }
+                    )
+                send({"type": "done", "id": rid})
+            except Exception as e:  # report and keep serving
+                send({"type": "error", "id": rid, "message": str(e)})
+            finally:
+                with state_lock:
+                    if active.get(rid) is req:
+                        del active[rid]
+                jobs.task_done()
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError as e:
+            send({"type": "error", "id": None, "message": f"bad json: {e}"})
+            continue
+        cmd = req.get("cmd")
+        if cmd == "speak":
+            req["cancelled"] = False
+            with state_lock:
+                active[req["id"]] = req
+            jobs.put(req)
+        elif cmd in ("speed", "cancel"):
+            with state_lock:
+                job = active.get(req["id"])
+                if job is not None:
+                    if cmd == "speed":
+                        job["speed"] = req["speed"]
+                    else:
+                        job["cancelled"] = True
+
+    # stdin closed: finish queued work before exiting.
+    jobs.join()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="mlx-community/Kokoro-82M-bf16")
@@ -153,92 +282,15 @@ def main() -> None:
 
         model.update(tree_map(lambda p: p.astype(mx.float32), model.parameters()))
         mx.eval(model.parameters())
-    sr = model.sample_rate
+
+    def get_pipeline(lang):
+        pipeline = model._get_pipeline(lang)
+        pipeline.voices = {}
+        return pipeline
+
     # Warm up the default English pipeline so the first request is fast.
     model._get_pipeline("a")
-    send({"type": "ready", "sr": sr})
-
-    jobs: queue.Queue = queue.Queue()
-    cancelled: set[str] = set()
-
-    def worker() -> None:
-        while True:
-            req = jobs.get()
-            rid = req["id"]
-            try:
-                voice = req.get("voice", "af_heart")
-                lang = voice[0]
-                pipeline = model._get_pipeline(lang)
-                pipeline.voices = {}
-                text = normalize_text(
-                    req["text"],
-                    join_lines=req.get("joinLines", True),
-                    expand_words=req.get("expandWords", True),
-                )
-                if lang in "ab":
-
-                    def measure(t: str) -> int:
-                        _, toks = pipeline.g2p(t)
-                        return sum(len(k.phonemes or "") + bool(k.whitespace) for k in toks)
-
-                else:
-                    measure = len  # non-English pipelines chunk by characters themselves
-                segments = [
-                    c for line in re.split(r"\n+", text.strip()) for c in split_chunks(line, measure)
-                ]
-                results = pipeline(
-                    segments, voice=voice, speed=float(req.get("speed", 1.0))
-                )
-                for seq, result in enumerate(results):
-                    if rid in cancelled:
-                        break
-                    if result.audio is None:
-                        continue
-                    audio = np.asarray(result.audio, dtype=np.float32).reshape(-1)
-                    if result.tokens:
-                        words = [
-                            {"text": t.text, "start": t.start_ts, "end": t.end_ts}
-                            for t in result.tokens
-                            if t.start_ts is not None and t.end_ts is not None
-                        ]
-                    else:
-                        words = estimate_words(result.graphemes, len(audio) / sr)
-                    send(
-                        {
-                            "type": "chunk",
-                            "id": rid,
-                            "seq": seq,
-                            "sr": sr,
-                            "pcm": base64.b64encode(audio.tobytes()).decode("ascii"),
-                            "words": words,
-                        }
-                    )
-                send({"type": "done", "id": rid})
-            except Exception as e:  # report and keep serving
-                send({"type": "error", "id": rid, "message": str(e)})
-            finally:
-                cancelled.discard(rid)
-                jobs.task_done()
-
-    threading.Thread(target=worker, daemon=True).start()
-
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            req = json.loads(line)
-        except json.JSONDecodeError as e:
-            send({"type": "error", "id": None, "message": f"bad json: {e}"})
-            continue
-        cmd = req.get("cmd")
-        if cmd == "speak":
-            jobs.put(req)
-        elif cmd == "cancel":
-            cancelled.add(req["id"])
-
-    # stdin closed: finish queued work before exiting.
-    jobs.join()
+    serve(get_pipeline, model.sample_rate)
 
 
 if __name__ == "__main__":

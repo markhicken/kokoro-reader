@@ -1,18 +1,17 @@
 :root {
-  color-scheme: light dark;
   font: 15px/1.6 -apple-system, BlinkMacSystemFont, sans-serif;
 }
 html,
 body {
   margin: 0;
   height: 100%;
-  background: transparent;
   overflow: hidden;
 }
-body {
+.overlay-surface {
+  height: 100%;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
 }
 #bar {
   -webkit-app-region: drag;
@@ -73,7 +72,7 @@ button:hover {
   user-select: text;
 }
 ::highlight(spoken) {
-  color: GrayText;
+  color: #adb5c3;
 }
 ::highlight(current) {
   background-color: #ffd54a;

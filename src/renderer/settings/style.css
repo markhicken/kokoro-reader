@@ -50,6 +50,16 @@ body {
   -webkit-app-region: no-drag;
 }
 
+body.windows {
+  background: Canvas;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.windows .titlebar {
+  -webkit-app-region: no-drag;
+  padding-top: 18px;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -168,6 +178,28 @@ h2 {
   pointer-events: none;
 }
 
+.row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 7px;
+  background: var(--control);
+  color: var(--text);
+  font: 18px/1 system-ui, sans-serif;
+}
+
+.icon-button:hover {
+  background: var(--control-hover);
+}
+
 .text {
   display: flex;
   flex-direction: column;
@@ -208,6 +240,28 @@ output {
   color: var(--text-2);
   min-width: 42px;
   text-align: right;
+}
+
+.speed-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.speed-warning {
+  flex: none;
+  width: 14px;
+  color: #985500;
+  font-size: 14px;
+  text-align: center;
+}
+
+.speed-warning[hidden] {
+  visibility: hidden;
+}
+
+@media (prefers-color-scheme: dark) {
+  .speed-warning { color: #ffc268; }
 }
 
 input[type='range'] {

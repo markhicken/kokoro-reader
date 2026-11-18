@@ -1,7 +1,7 @@
 import type { Word } from '../../shared/types'
 
 export interface TimedRange {
-  start: number // absolute AudioContext time
+  start: number // seconds from the start of the selection
   end: number
   from: number // UTF-16 offsets into the original text
   to: number
@@ -16,6 +16,7 @@ export class Highlighter {
   private node: Text
   private cursor = 0
   private ranges: TimedRange[] = []
+  private checkpoints = new Map<number, { cursor: number; count: number }>()
   private idx = -1
 
   constructor(
@@ -28,8 +29,9 @@ export class Highlighter {
     CSS.highlights.clear()
   }
 
-  /** Add a chunk's words; `offset` converts chunk-relative times to absolute. */
-  addWords(words: Word[], offset: number): void {
+  /** Add a chunk's words on the selection timeline. */
+  addWords(seq: number, words: Word[], offset: number): void {
+    this.checkpoints.set(seq, { cursor: this.cursor, count: this.ranges.length })
     for (const w of words) {
       const token = w.text.trim()
       if (!token) continue
@@ -42,12 +44,47 @@ export class Highlighter {
     }
   }
 
-  /** Advance to `time`; returns the newly current word, or null if unchanged. */
+  /** Find the last word beginning at or before a position, including after a seek. */
+  private indexAt(time: number): number {
+    let low = 0
+    let high = this.ranges.length
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2)
+      if (this.ranges[mid].start <= time) low = mid + 1
+      else high = mid
+    }
+    return low - 1
+  }
+
+  wordAt(time: number): TimedRange | undefined {
+    const word = this.ranges[this.indexAt(time)]
+    return word && time < word.end ? word : undefined
+  }
+
+  startForOffset(from: number): number | undefined {
+    return this.ranges.find((word) => word.from === from)?.start
+  }
+
+  discardFrom(seq: number): void {
+    const checkpoint = this.checkpoints.get(seq)
+    if (!checkpoint) return
+    this.cursor = checkpoint.cursor
+    this.ranges.length = checkpoint.count
+    this.idx = -1
+    CSS.highlights.clear()
+    for (const key of this.checkpoints.keys()) if (key >= seq) this.checkpoints.delete(key)
+  }
+
+  /** Update the highlight for `time` and return the current word when it changes. */
   update(time: number): TimedRange | null {
-    let i = this.idx
-    while (i + 1 < this.ranges.length && this.ranges[i + 1].start <= time) i++
+    const i = this.indexAt(time)
     if (i === this.idx) return null
     this.idx = i
+    if (i < 0) {
+      CSS.highlights.clear()
+      this.scroller.scrollTop = 0
+      return null
+    }
     const r = this.ranges[i]
 
     const current = new Range()

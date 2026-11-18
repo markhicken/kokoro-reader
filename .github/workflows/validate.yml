@@ -1,0 +1,55 @@
+name: Validate desktop builds
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS arm64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v5
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Build ad-hoc signed Mac package
+        # The configured identity is "-", so PR builds sign without a certificate or secrets.
+        env:
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: npm run build
+      - run: node scripts/check-package.mjs
+      - run: node scripts/smoke-engine.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v5
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: node scripts/check-package.mjs
+      - run: node scripts/smoke-engine.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-installer
+          path: dist/*-setup.exe
+          if-no-files-found: error

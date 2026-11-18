@@ -8,9 +8,14 @@
 //                                             overlay the word at UTF-16 offsets [from, to)
 //                                             of the captured text, in the source app
 //   {"cmd":"clear"}                           hide the overlay
+//   {"cmd":"refocus"}                         give focus back to the source app if Kokoro Reader took it
+//   {"cmd":"status"}                          report whether Accessibility calls actually work
+// The Kokoro Reader process id is the first argument. Its own windows (playback controls, reader
+// panel) never count as the user leaving the source app, so highlighting continues while they're used.
 // Responses:
 //   {"type":"capture","ok":true,"text":"...","sourceHighlight":true}
 //   {"type":"capture","ok":false,"error":"untrusted"|"noselection","app":"bundle id","detail":"..."}
+//   {"type":"status","trusted":true}
 import AppKit
 import ApplicationServices
 
@@ -83,10 +88,25 @@ func restoreAccessibility() {
 }
 
 /// True if Accessibility calls are being refused for this process despite AXIsProcessTrusted().
+/// A stale grant answers .apiDisabled; some macOS versions answer .cannotComplete to both an app's
+/// role and the system-wide focus query instead (a healthy app always has a role).
 func axDisabled(_ app: AXUIElement) -> Bool {
     var value: CFTypeRef?
-    if AXUIElementCopyAttributeValue(app, kAXRoleAttribute as CFString, &value) == .apiDisabled { return true }
-    return AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &value) == .apiDisabled
+    let appErr = AXUIElementCopyAttributeValue(app, kAXRoleAttribute as CFString, &value)
+    let sysErr = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &value)
+    log("axDisabled probe: appRole=\(appErr.rawValue) systemFocus=\(sysErr.rawValue)")
+    if appErr == .apiDisabled || sysErr == .apiDisabled { return true }
+    return appErr == .cannotComplete && sysErr == .cannotComplete
+}
+
+/// True only if the grant is present and valid: a stale entry passes AXIsProcessTrusted()
+/// but every AX call fails with apiDisabled.
+func accessibilityUsable() -> Bool {
+    guard AXIsProcessTrusted() else { return false }
+    let systemWide = AXUIElementCreateSystemWide()
+    AXUIElementSetMessagingTimeout(systemWide, 0.5)
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &value) != .apiDisabled
 }
 
 func focusedElement(in app: AXUIElement) -> AXUIElement? {
@@ -225,6 +245,8 @@ enum Source {
 }
 
 var source: Source?
+/// Kokoro Reader's own process, whose windows may take focus without ending the highlight.
+let readerPid: pid_t = CommandLine.arguments.count > 1 ? pid_t(CommandLine.arguments[1]) ?? 0 : 0
 /// App and focused element the current selection was captured from.
 var sourcePid: pid_t?
 var sourceElement: AXUIElement?
@@ -352,10 +374,12 @@ func capture() {
 }
 
 /// True while the captured selection is still what the user is looking at: its app is
-/// frontmost and its element still has focus (a tab switch changes the focused web area).
+/// frontmost (or Kokoro Reader, whose controls were just used) and its element still has focus
+/// (a tab switch changes the focused web area).
 func sourceStillVisible() -> Bool {
     guard let pid = sourcePid, let el = sourceElement else { return false }
-    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
+    let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    guard front == pid || (readerPid != 0 && front == readerPid) else { return false }
     let app = AXUIElementCreateApplication(pid)
     AXUIElementSetMessagingTimeout(app, 0.2)
     guard let focused = focusedElement(in: app) else { return false }
@@ -380,6 +404,17 @@ func wordRect(from: Int, to: Int, text: String) -> CGRect? {
         return rect
     case nil:
         return nil
+    }
+}
+
+/// Hand focus back to the source app after Kokoro Reader's own window took it.
+func refocusSource() {
+    guard let pid = sourcePid, readerPid != 0,
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == readerPid else { return }
+    // Setting AXFrontmost works from a background process, where activate() may be refused.
+    let app = AXUIElementCreateApplication(pid)
+    if AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) != .success {
+        NSRunningApplication(processIdentifier: pid)?.activate(options: [])
     }
 }
 
@@ -441,7 +476,8 @@ NSWorkspace.shared.notificationCenter.addObserver(
     forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
 ) { note in
     let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-    if let pid = sourcePid, app?.processIdentifier != pid { overlay.hide() }
+    guard let pid = sourcePid, let active = app?.processIdentifier else { return }
+    if active != pid && active != readerPid { overlay.hide() }
 }
 
 func handle(_ line: String) {
@@ -457,6 +493,10 @@ func handle(_ line: String) {
     case "clear":
         overlay.hide()
         restoreAccessibility()
+    case "refocus":
+        refocusSource()
+    case "status":
+        send(["type": "status", "trusted": accessibilityUsable()])
     default:
         break
     }

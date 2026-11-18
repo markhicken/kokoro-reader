@@ -1,0 +1,63 @@
+:root {
+  font: 13px/1.45 system-ui, sans-serif;
+}
+
+body {
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+}
+
+main {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 14px 18px;
+}
+
+.preparing:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.notice {
+  width: 100%;
+  text-align: center;
+}
+
+.spinner {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  border: 2px solid #ffffff48;
+  border-top-color: #ffad83;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.hint {
+  margin: 4px 0 0;
+  color: #e4e6ec;
+}
+
+kbd {
+  font: inherit;
+  font-weight: 650;
+  color: #fff;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

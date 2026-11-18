@@ -1,6 +1,6 @@
-import type { EngineStatus } from '../../shared/types'
 import { Highlighter } from './highlight'
 import { Player } from './player'
+import '../overlay'
 
 const api = window.kokoro
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
@@ -8,38 +8,52 @@ const statusEl = $('status')
 const pauseBtn = $<HTMLButtonElement>('pause')
 const textEl = $('text')
 const scroller = $('scroller')
+const SKIP_SECONDS = 10
 
 let jobId: string | null = null
+let generationId: string | null = null
+let speed = 1
+let pendingSeek: { seq: number; fraction: number; wordOffset?: number } | undefined
 const player = new Player()
 let highlighter: Highlighter | null = null
 let generationDone = false
+let playbackStarted = false
 let timer: ReturnType<typeof setInterval> | undefined
-let engineStatus: EngineStatus = 'loading'
 
 function setStatus(text: string): void {
   statusEl.textContent = text
 }
 
-/** Show the spinner while audio is still being generated. */
-function setBusy(busy: boolean): void {
-  document.body.classList.toggle('busy', busy)
+function updateReadStatus(): void {
+  const preparing = !playbackStarted || pendingSeek !== undefined
+  document.body.classList.toggle('busy', !player.paused && preparing)
+  setStatus(player.paused ? 'Paused' : preparing ? 'Preparing audio…' : 'Reading')
 }
 
 function reset(): void {
   clearInterval(timer)
-  setBusy(false)
+  document.body.classList.remove('busy')
   player.stop()
   highlighter = null
   jobId = null
+  generationId = null
+  pendingSeek = undefined
+  playbackStarted = false
 }
 
 // A timer (not requestAnimationFrame) so timing keeps running while the panel is hidden.
 function tick(): void {
   if (!highlighter || !jobId) return
-  const t = player.ctx.currentTime
-  const word = highlighter.update(t)
-  if (word) api.reportWord(jobId, word.from, word.to, word.text)
-  if (generationDone && t >= player.endTime) finish()
+  if (!playbackStarted && player.started) {
+    playbackStarted = true
+    updateReadStatus()
+    api.playbackStarted(jobId)
+  }
+  if (playbackStarted) {
+    const word = highlighter.update(player.position)
+    if (word) api.reportWord(jobId, word.from, word.to, word.text)
+  }
+  if (generationDone && !pendingSeek && player.drained) finish()
 }
 
 function finish(): void {
@@ -49,35 +63,62 @@ function finish(): void {
   api.finished(id)
 }
 
-api.onStatus((s) => {
-  engineStatus = s
-  if (s === 'loading') setStatus('Loading model…')
-})
+function showReadError(message: string): void {
+  reset()
+  setStatus(`Error: ${message}`)
+}
 
-api.onReaderStart(({ id, text }) => {
+function failPlayback(id: string, error: unknown): void {
+  if (id !== jobId) return
+  const message = error instanceof Error ? error.message : String(error)
+  showReadError(message)
+  api.playbackFailed(id, message)
+}
+
+api.onReaderStart(({ id, text, speed: initialSpeed }) => {
   reset()
   jobId = id
+  generationId = id
+  speed = initialSpeed
   generationDone = false
-  setBusy(true)
-  void player.begin()
+  void player.begin().catch((error) => failPlayback(id, error))
   highlighter = new Highlighter(textEl, scroller, text)
   scroller.scrollTop = 0
   pauseBtn.textContent = '⏸'
-  setStatus(engineStatus === 'ready' ? 'Generating…' : 'Loading model…')
+  updateReadStatus()
   timer = setInterval(tick, 20)
 })
 
 api.onChunk((chunk) => {
-  if (chunk.id !== jobId || !highlighter) return
-  const { start } = player.enqueue(chunk.pcm, chunk.sr)
-  highlighter.addWords(chunk.words, start)
-  setStatus('Reading')
+  if (chunk.id !== jobId || chunk.generationId !== generationId || !highlighter) return
+  try {
+    const seek = pendingSeek
+    if (seek) {
+      player.discardFrom(seek.seq)
+      highlighter.discardFrom(seek.seq)
+    }
+    const { start, duration } = player.enqueue(chunk, !seek)
+    highlighter.addWords(chunk.seq, chunk.words, start)
+    if (seek) {
+      const wordStart = seek.wordOffset === undefined ? undefined : highlighter.startForOffset(seek.wordOffset)
+      const target = wordStart ?? (chunk.seq === seek.seq ? start + seek.fraction * duration : start)
+      player.seek(target)
+      pendingSeek = undefined
+      updateReadStatus()
+    }
+  } catch (error) {
+    failPlayback(chunk.id, error)
+  }
 })
 
-api.onDone((id) => {
-  if (id !== jobId) return
+api.onDone((id, completedGeneration) => {
+  if (id !== jobId || completedGeneration !== generationId) return
+  pendingSeek = undefined
   generationDone = true
-  setBusy(false)
+})
+
+api.onReaderSpeed((id, nextSpeed) => {
+  if (id === jobId) speed = nextSpeed
 })
 
 api.onStop(() => {
@@ -91,9 +132,11 @@ api.onMessage((message) => {
   setStatus('Kokoro')
 })
 
-api.onError((message) => {
-  setBusy(false)
-  setStatus(`Error: ${message}`)
+api.onError(showReadError)
+api.onPlaybackCommand((id, command) => {
+  if (id !== jobId) return
+  if (command === 'toggle') void togglePause()
+  else skip(command === 'rewind' ? -SKIP_SECONDS : SKIP_SECONDS)
 })
 
 pauseBtn.addEventListener('click', togglePause)
@@ -104,19 +147,56 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === ' ') {
     e.preventDefault()
     togglePause()
+  } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && playbackStarted) {
+    e.preventDefault()
+    skip(e.key === 'ArrowLeft' ? -SKIP_SECONDS : SKIP_SECONDS)
   }
 })
 
+function skip(seconds: number): void {
+  if (!jobId || !highlighter || !playbackStarted) return
+  const target = Math.min(player.duration, Math.max(0, player.position + seconds))
+  const word = highlighter.wordAt(target)
+  const position = word?.start ?? target
+  try {
+    const chunk = player.chunkAt(position)
+    if (chunk && (pendingSeek || player.needsRegeneration(chunk.seq, speed))) {
+      const nextGeneration = crypto.randomUUID()
+      pendingSeek = {
+        seq: chunk.seq,
+        fraction: (position - chunk.start) / chunk.duration,
+        wordOffset: word?.from
+      }
+      generationId = nextGeneration
+      generationDone = false
+      player.hold(position)
+      api.regenerateForSeek(jobId, nextGeneration, chunk.seq)
+      updateReadStatus()
+    } else {
+      player.seek(position)
+    }
+    tick()
+  } catch (error) {
+    failPlayback(jobId, error)
+  }
+}
+
 async function togglePause(): Promise<void> {
-  if (!jobId) return
-  await player.toggle()
+  const id = jobId
+  if (!id) return
+  try {
+    await player.toggle()
+  } catch (error) {
+    failPlayback(id, error)
+    return
+  }
+  if (id !== jobId) return
   pauseBtn.textContent = player.paused ? '▶' : '⏸'
-  setStatus(player.paused ? 'Paused' : 'Reading')
+  updateReadStatus()
+  api.playbackPaused(id, player.paused)
 }
 
 function stop(): void {
   reset()
   api.stop()
 }
-
-api.getStatus().then((s) => (engineStatus = s))

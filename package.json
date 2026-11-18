@@ -2,17 +2,15 @@
   "name": "kokoro-reader",
   "version": "0.1.0",
   "private": true,
-  "description": "Free, private, AI text-to-speech for macOS",
+  "description": "Free, private, AI text-to-speech for macOS and Windows",
   "license": "GPL-3.0-only",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "npm run build:native && electron-vite dev",
-    "build": "npm run build:native && electron-vite build",
+    "dev": "node scripts/build.mjs native && electron-vite dev",
+    "build": "node scripts/build.mjs",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node node_modules/electron/install.js && cd python && uv sync",
-    "dist": "npm run build && cp \"$(command -v uv)\" build/bin/uv && electron-builder --mac",
-    "build:native": "mkdir -p build/bin && swiftc -O native/helper.swift -o build/bin/kokoro-helper"
+    "postinstall": "node scripts/build.mjs install"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
@@ -36,23 +34,6 @@
       "package.json"
     ],
     "extraResources": [
-      {
-        "from": "python",
-        "to": "python",
-        "filter": [
-          "kokoro_server.py",
-          "pyproject.toml",
-          "uv.lock"
-        ]
-      },
-      {
-        "from": "build/bin",
-        "to": "bin",
-        "filter": [
-          "uv",
-          "kokoro-helper"
-        ]
-      },
       {
         "from": "LICENSE",
         "to": "licenses/LICENSE"
@@ -86,12 +67,48 @@
       "icon": "build/icon.icns",
       "identity": "-",
       "hardenedRuntime": false,
+      "extraResources": [
+        {
+          "from": "python",
+          "to": "python",
+          "filter": ["kokoro_server.py", "pyproject.toml", "uv.lock"]
+        },
+        {
+          "from": "build/bin",
+          "to": "bin",
+          "filter": ["uv", "kokoro-helper"]
+        }
+      ],
       "extendInfo": {
         "LSUIElement": true
       }
     },
     "dmg": {
       "title": "Kokoro Reader"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png",
+      "extraResources": [
+        {
+          "from": "python",
+          "to": "python",
+          "filter": ["kokoro_server.py", "kokoro_windows.py", "windows/pyproject.toml", "windows/uv.lock"]
+        },
+        {
+          "from": "build/bin",
+          "to": "bin",
+          "filter": ["uv.exe", "kokoro-helper.exe"]
+        },
+        {
+          "from": "build/icon.png",
+          "to": "tray-windows.png"
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}",
+      "perMachine": false
     }
   }
 }

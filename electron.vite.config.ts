@@ -1,16 +1,21 @@
+import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+
+const rendererRoot = realpathSync(resolve(__dirname, 'src/renderer'))
 
 export default defineConfig({
   main: { plugins: [externalizeDepsPlugin()] },
   preload: { plugins: [externalizeDepsPlugin()] },
   renderer: {
-    root: 'src/renderer',
+    root: rendererRoot,
     build: {
       rollupOptions: {
         input: {
-          settings: resolve(__dirname, 'src/renderer/settings/index.html'),
-          reader: resolve(__dirname, 'src/renderer/reader/index.html')
+          settings: resolve(rendererRoot, 'settings/index.html'),
+          reader: resolve(rendererRoot, 'reader/index.html'),
+          preparing: resolve(rendererRoot, 'preparing/index.html'),
+          playback: resolve(rendererRoot, 'playback/index.html')
         }
       }
     }
