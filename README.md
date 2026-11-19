@@ -8,7 +8,7 @@ tray on Windows. It uses the open-weight [Kokoro TTS](https://github.com/hexgrad
 running locally through [mlx-audio](https://github.com/Blaizzy/mlx-audio) on Apple Silicon and through
 CPU PyTorch on Windows.
 
-<img width="459" height="838" alt="Screenshot 2026-10-07 at 10 41 10 AM" src="https://github.com/user-attachments/assets/54adb358-243f-4dc5-a994-de986f6efc3e" />
+<img width="460" alt="Kokoro Reader settings" src="docs/images/screenshot.png" />
 
 - **Free** — open source (GPL-3.0), no subscription, no API keys, no usage limits.
 - **Private** — speech is generated on your computer. The app downloads Python dependencies, model
@@ -20,7 +20,8 @@ CPU PyTorch on Windows.
 Installers are listed on the [Releases page](https://github.com/markhicken/kokoro-reader/releases/latest).
 
 - **macOS (Apple Silicon)** — open the `.dmg` and drag Kokoro Reader to Applications.
-- **Windows 11 (x64)** — run the `x64-setup.exe` installer, then open Kokoro Reader
+- **Windows 11 (x64 or ARM64)** — run the `x64-setup.exe` or `arm64-setup.exe` installer matching
+  your processor, then open Kokoro Reader
   from Start. Look in the notification-area overflow if the tray icon is hidden. Local builds use
   an unsigned installer unless Windows signing credentials are configured.
 
@@ -39,7 +40,8 @@ Both platforms require Node.js 22.12 or later and [uv](https://docs.astral.sh/uv
 Python and the platform's locked dependencies. Initial setup and the first use of a voice need internet access.
 
 - **macOS** — Apple Silicon and Xcode Command Line Tools (`xcode-select --install`).
-- **Windows** — Windows 11 x64 and Visual Studio 2022 Build Tools with **Desktop development with C++**
+- **Windows** — Windows 11 x64 or ARM64, a matching native Node.js and uv installation, and Visual Studio
+  2022 Build Tools with **Desktop development with C++**, the matching x64 or ARM64 C++ compiler tools,
   and a Windows SDK. The build locates the compiler from an ordinary PowerShell or Command Prompt.
 
 ```text
@@ -49,12 +51,24 @@ npm run build
 ```
 
 The installer goes in `dist/`. macOS produces `Kokoro Reader-<version>-arm64.dmg` and Windows produces
-`Kokoro Reader-<version>-x64-setup.exe`.
+`Kokoro Reader-<version>-x64-setup.exe` or `Kokoro Reader-<version>-arm64-setup.exe`,
+matching the build host's Node.js architecture. Each Windows installer includes a native Electron app,
+Accessibility helper, and uv; its Python speech engine uses the same architecture.
 
 The packaged app includes `uv` and the Python sources. On first launch it creates a Python environment
 in its per-user application data directory. The setup can take a few minutes. macOS stores it under
 `~/Library/Application Support/Kokoro Reader/` and Windows under `%APPDATA%\Kokoro Reader\`.
 The model comes from Hugging Face. Rebuilding the Mac app can require a new Accessibility grant.
+
+### Update the README screenshot
+
+Run `npm run screenshot` on macOS or Windows after installing the development dependencies. It builds
+the current UI and captures an isolated settings preview into `docs/images/screenshot.png`, which the
+README references directly. The preview uses a fixed dark theme, a platform-matched window frame,
+and sample settings without reading or changing your preferences, starting the speech engine, or
+packaging an installer. The frame is rendered inside the preview, so no desktop capture or Screen
+Recording permission is needed. It captures the host platform's UI; commit the updated PNG with any
+relevant UI changes.
 
 ## Usage
 
@@ -88,21 +102,22 @@ G2P dependencies (`misaki[ja]`, `misaki[zh]`).
 
 ## Validate before release
 
-The **Validate desktop builds** workflow builds both installers without publishing and runs a packaged
+The **Validate desktop builds** workflow builds all three installers without publishing and runs a packaged
 speech test covering timestamps, cancellation, and cached offline speech. Require its **macOS arm64**
-and **Windows x64** checks before merging platform changes.
+and **Windows x64** and **Windows arm64** checks before merging platform changes.
 
 - **Apple Silicon Mac** — install the test DMG over the previous build and verify settings persist.
   Exercise first launch, grant and regrant Accessibility, then test the shortcut and tray action in
   TextEdit and Safari. Verify word highlights, switching apps, full-screen sources, pause and resume,
   stopping with the shortcut, and the floating panel with highlighting disabled or enabled.
-- **Windows 11 x64** — install under a standard account. Verify first setup, offline relaunch, upgrade,
+- **Windows 11 x64 and ARM64** — test each installer on matching hardware under a standard account.
+  Verify first setup, offline relaunch, upgrade,
   and uninstall. Test the tray and shortcut in Notepad, a Chromium browser, and VS Code. Exercise
   focus changes, apps without selection support, and monitors using different scaling.
 
 The **Release** workflow publishes on pushes to `main` or `master`, or when run manually. Every release
-requires both installers to build and pass package checks; no repository variable is needed to enable
-Windows. Verify the release includes both the macOS arm64 `.dmg` and Windows x64 `-setup.exe` for the
+requires all three installers to build and pass package checks; no repository variable is needed to enable
+Windows. Verify the release includes the macOS arm64 `.dmg` and both Windows x64 and ARM64 `-setup.exe` files for the
 same version, then complete the platform checks above.
 
 ## Troubleshooting

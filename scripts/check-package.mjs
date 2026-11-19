@@ -4,10 +4,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const windows = process.platform === 'win32'
+const arch = process.arch
 const artifacts = readdirSync('dist')
-assert(artifacts.some((name) => name.endsWith(windows ? '-x64-setup.exe' : '-arm64.dmg')), 'Installer missing')
+assert(artifacts.some((name) => name.endsWith(windows ? `-${arch}-setup.exe` : '-arm64.dmg')), 'Installer missing')
 const contents = join('dist', 'mac-arm64', 'Kokoro Reader.app', 'Contents')
-const resources = windows ? join('dist', 'win-unpacked', 'resources') : join(contents, 'Resources')
+const windowsDir = join('dist', arch === 'x64' ? 'win-unpacked' : `win-${arch}-unpacked`)
+const resources = windows ? join(windowsDir, 'resources') : join(contents, 'Resources')
 const macOnly = ['bin/kokoro-helper', 'bin/uv', 'python/pyproject.toml', 'python/uv.lock']
 const windowsOnly = ['bin/kokoro-helper.exe', 'bin/uv.exe', 'python/windows/pyproject.toml', 'python/windows/uv.lock',
   'python/kokoro_windows.py', 'tray-windows.png']
@@ -21,12 +23,13 @@ for (const path of windows ? macOnly : windowsOnly) {
 }
 
 if (windows) {
-  for (const path of [join('dist', 'win-unpacked', 'Kokoro Reader.exe'), join(resources, 'bin/kokoro-helper.exe'),
+  assert(['x64', 'arm64'].includes(arch), `Unsupported Windows architecture: ${arch}`)
+  for (const path of [join(windowsDir, 'Kokoro Reader.exe'), join(resources, 'bin/kokoro-helper.exe'),
     join(resources, 'bin/uv.exe')]) {
     const image = readFileSync(path)
     const header = image.readUInt32LE(0x3c)
     assert.equal(image.toString('ascii', header, header + 4), 'PE\0\0', path)
-    assert.equal(image.readUInt16LE(header + 4), 0x8664, `${path} must be x64`)
+    assert.equal(image.readUInt16LE(header + 4), arch === 'arm64' ? 0xaa64 : 0x8664, `${path} must be ${arch}`)
   }
 } else {
   const arch = (path) => execFileSync('lipo', ['-archs', path], { encoding: 'utf8' }).trim()

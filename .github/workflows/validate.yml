@@ -34,13 +34,22 @@ jobs:
           if-no-files-found: error
 
   windows:
-    name: Windows x64
-    runs-on: windows-2025
+    name: Windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          architecture: ${{ matrix.arch }}
           cache: npm
       - uses: astral-sh/setup-uv@v5
       - run: npm ci
@@ -50,6 +59,6 @@ jobs:
       - run: node scripts/smoke-engine.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-x64-installer
-          path: dist/*-setup.exe
+          name: windows-${{ matrix.arch }}-installer
+          path: dist/*-${{ matrix.arch }}-setup.exe
           if-no-files-found: error

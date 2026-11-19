@@ -6,7 +6,8 @@ import { createInterface } from 'node:readline'
 
 const windows = process.platform === 'win32'
 const dev = process.argv.includes('--dev')
-const resources = resolve(windows ? 'dist/win-unpacked/resources' : 'dist/mac-arm64/Kokoro Reader.app/Contents/Resources')
+const windowsDir = process.arch === 'x64' ? 'win-unpacked' : `win-${process.arch}-unpacked`
+const resources = resolve(windows ? `dist/${windowsDir}/resources` : 'dist/mac-arm64/Kokoro Reader.app/Contents/Resources')
 const pythonDir = dev ? resolve('python') : join(resources, 'python')
 const uv = dev ? (windows ? 'uv.exe' : 'uv') : join(resources, 'bin', windows ? 'uv.exe' : 'uv')
 mkdirSync('build/bin', { recursive: true })

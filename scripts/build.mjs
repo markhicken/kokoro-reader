@@ -6,9 +6,9 @@ const argv = process.argv.slice(2)
 // `npm run build -- <options>` passes electron-builder options straight through.
 const task = argv[0] && !argv[0].startsWith('-') ? argv[0] : 'build'
 const args = task === argv[0] ? argv.slice(1) : argv
-const windows = process.platform === 'win32' && process.arch === 'x64'
+const windows = process.platform === 'win32' && ['x64', 'arm64'].includes(process.arch)
 const mac = process.platform === 'darwin' && process.arch === 'arm64'
-if (!windows && !mac) throw new Error('Build on Windows x64 or Apple Silicon macOS.')
+if (!windows && !mac) throw new Error('Build on Windows x64/ARM64 or Apple Silicon macOS.')
 
 function run(command, args, capture = false) {
   const result = spawnSync(command, args, {
@@ -24,7 +24,7 @@ const bin = join('build', 'bin')
 
 function buildNative() {
   mkdirSync(bin, { recursive: true })
-  if (windows) run('cmd.exe', ['/d', '/c', 'scripts\\build-windows.cmd'])
+  if (windows) run('cmd.exe', ['/d', '/c', 'scripts\\build-windows.cmd', process.arch])
   else run('swiftc', ['-O', 'native/helper.swift', '-o', join(bin, 'kokoro-helper')])
 }
 

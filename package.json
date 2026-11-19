@@ -9,6 +9,7 @@
     "dev": "node scripts/build.mjs native && electron-vite dev",
     "build": "node scripts/build.mjs",
     "start": "electron-vite preview",
+    "screenshot": "node scripts/update-screenshot.mjs",
     "typecheck": "tsc --noEmit",
     "postinstall": "node scripts/build.mjs install"
   },
@@ -87,7 +88,7 @@
       "title": "Kokoro Reader"
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": ["nsis"],
       "icon": "build/icon.png",
       "extraResources": [
         {
